@@ -1,0 +1,12 @@
+torch
+pytorch-lightning
+transformers
+datasets
+scikit-learn
+pandas
+openpyxl
+setuptools
+flask
+sentence-transformers
+ollama
+langdetect

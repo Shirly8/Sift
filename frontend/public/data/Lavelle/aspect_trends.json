@@ -1,0 +1,75 @@
+{
+  "2025-07": {
+    "Service": 0.76,
+    "Ambience": 1.12,
+    "Food Quality": 0.8,
+    "Drinks": 0.77,
+    "Menu": 0.6,
+    "Desserts": 1.0,
+    "Taste": 0.71,
+    "Price": 1.0,
+    "Location": 2.0
+  },
+  "2025-08": {
+    "Taste": 1.0,
+    "Food Quality": 1.3,
+    "Service": 1.48,
+    "Ambience": 1.7,
+    "Drinks": 1.17,
+    "Price": 0.67,
+    "Location": 0.29,
+    "Menu": 1.1,
+    "Desserts": 1.22
+  },
+  "2025-09": {
+    "Service": 1.17,
+    "Drinks": 1.08,
+    "Food Quality": 1.32,
+    "Price": 0.29,
+    "Desserts": 1.43,
+    "Taste": 1.5,
+    "Menu": 0.5,
+    "Ambience": 2.0,
+    "Location": 2.0
+  },
+  "2025-10": {
+    "Ambience": 1.33,
+    "Service": 1.69,
+    "Food Quality": 1.0,
+    "Taste": 1.33,
+    "Menu": 1.0,
+    "Location": 2.0,
+    "Drinks": 1.5,
+    "Desserts": 0.5,
+    "Price": 0.0
+  },
+  "2025-11": {
+    "Service": 1.14,
+    "Drinks": 1.33,
+    "Location": 1.0,
+    "Taste": 1.67,
+    "Desserts": 1.0,
+    "Food Quality": 1.0,
+    "Ambience": 1.33,
+    "Price": 0.0,
+    "Menu": 0.5
+  },
+  "2025-12": {
+    "Service": 0.67,
+    "Food Quality": 2.0,
+    "Desserts": 2.0,
+    "Drinks": 2.0,
+    "Ambience": 2.0
+  },
+  "2026-01": {
+    "Service": 0.67,
+    "Location": 2.0,
+    "Ambience": 0.0
+  },
+  "2026-02": {
+    "Service": 0.0,
+    "Ambience": 0.0,
+    "Price": 0.0,
+    "Food Quality": 0.0
+  }
+}

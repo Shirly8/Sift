@@ -1,0 +1,65 @@
+{
+  "Food Quality": {
+    "Positive": 170,
+    "Neutral": 15,
+    "Negative": 13,
+    "total": 198,
+    "avg": 1.79
+  },
+  "Desserts": {
+    "Positive": 74,
+    "Neutral": 12,
+    "Negative": 4,
+    "total": 90,
+    "avg": 1.78
+  },
+  "Taste": {
+    "Positive": 89,
+    "Neutral": 6,
+    "Negative": 13,
+    "total": 108,
+    "avg": 1.7
+  },
+  "Menu": {
+    "Positive": 30,
+    "Neutral": 7,
+    "Negative": 6,
+    "total": 43,
+    "avg": 1.56
+  },
+  "Service": {
+    "Positive": 116,
+    "Neutral": 12,
+    "Negative": 17,
+    "total": 145,
+    "avg": 1.68
+  },
+  "Ambience": {
+    "Positive": 60,
+    "Neutral": 6,
+    "Negative": 5,
+    "total": 71,
+    "avg": 1.77
+  },
+  "Price": {
+    "Positive": 15,
+    "Neutral": 2,
+    "Negative": 7,
+    "total": 24,
+    "avg": 1.33
+  },
+  "Location": {
+    "Positive": 18,
+    "Neutral": 4,
+    "Negative": 5,
+    "total": 27,
+    "avg": 1.48
+  },
+  "Drinks": {
+    "Positive": 20,
+    "Neutral": 6,
+    "Negative": 3,
+    "total": 29,
+    "avg": 1.59
+  }
+}
