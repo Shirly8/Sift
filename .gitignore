@@ -5,3 +5,16 @@
 /sample.py
 
 .DS_Store
+/Backend/.env
+/Backend/Evaluator/__pycache__
+/Backend/Models
+/Backend/Training/__pycache__
+/Backend/Sentiment/__pycache__
+
+
+/Frontend/node_modules
+/Frontend/build
+/Frontend/.env
+/Frontend/.DS_Store
+
+
