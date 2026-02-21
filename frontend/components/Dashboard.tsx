@@ -10,10 +10,15 @@ import AspectPerformance from './AspectPerformance';
 import DistributionHeatmap from './DistributionHeatmap';
 import Footer from './Footer';
 import AspectTrends from './AspectTrends';
+import Modals from './Modals';
 
 
 export default function Dashboard() {
   const [loaded, setLoaded] = useState(false);
+  const [showEval, setShowEval] = useState(false);
+  const [showCSV, setShowCSV] = useState(false);
+  const [showTrain, setShowTrain] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     setLoaded(true);
@@ -45,7 +50,7 @@ export default function Dashboard() {
       <div className="relative z-[1] max-w-[1320px] mx-auto px-28">
         {/* Header */}
         <div style={fadeIn(0)}>
-          <Header />
+          <Header onShowEval={() => setShowEval(true)} onShowCSV={() => setShowCSV(true)} onShowTrain={() => setShowTrain(true)} onShowSettings={() => setShowSettings(true)} />
         </div>
 
 
@@ -95,6 +100,19 @@ export default function Dashboard() {
           <Footer />
         </div>
       </div>
+
+      {/* Modals */}
+      <Modals
+        showEval={showEval}
+        showCSV={showCSV}
+        showTrain={showTrain}
+        showSettings={showSettings}
+        onCloseEval={() => setShowEval(false)}
+        onCloseCSV={() => setShowCSV(false)}
+        onCloseTrain={() => setShowTrain(false)}
+        onCloseSettings={() => setShowSettings(false)}
+        onShowEval={() => setShowEval(true)}
+      />
     </div>
   );
 }

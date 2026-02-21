@@ -1,0 +1,13 @@
+review,aspect,sentiment
+"The food was delicious and fresh.",Food,Positive
+"The food was delicious and fresh.",Service,Positive
+"The food was delicious and fresh.",Ambiance,Positive
+"Service was slow despite the restaurant not being busy.",Service,Negative
+"Service was slow despite the restaurant not being busy.",Food,Neutral
+"Great atmosphere with excellent views.",Ambiance,Positive
+"Great atmosphere with excellent views.",Service,Positive
+"Prices are too high for the portion size.",Price,Negative
+"Prices are too high for the portion size.",Food,Neutral
+"The staff was friendly and attentive.",Service,Positive
+"The menu has good variety.",Menu,Positive
+"Disappointed with the quality.",Food,Negative

@@ -6,14 +6,24 @@ import { createPortal } from 'react-dom';
 import AnimatedCount from './AnimatedCount';
 import { useRestaurant } from '@/context/RestaurantContext';
 
+interface HeaderProps {
+  onShowEval?: () => void;
+  onShowCSV?: () => void;
+  onShowTrain?: () => void;
+  onShowSettings?: () => void;
+}
 
-export default function Header() {
+export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSettings }: HeaderProps = {}) {
   const { data, restaurantOptions, setRestaurantId, restaurantId } = useRestaurant();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [settingHover, setSettingHover] = useState(false);
   const [plusHover, setPlusHover] = useState(false);
   const [tableHover, setTableHover] = useState(false);
   const [chartHover, setChartHover] = useState(false);
+  const [showSettingsTooltip, setShowSettingsTooltip] = useState(false);
+  const [showPlusTooltip, setShowPlusTooltip] = useState(false);
+  const [showTableTooltip, setShowTableTooltip] = useState(false);
+  const [showChartTooltip, setShowChartTooltip] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
@@ -127,46 +137,94 @@ export default function Header() {
         </div>
 
 
-        {/* Plus icon — Add / Upload CSV / Train */}
-        <div
-          className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
-            plusHover ? 'border-terracotta' : 'border-neutral-border-inactive'
-          }`}
-          onMouseEnter={() => setPlusHover(true)}
-          onMouseLeave={() => setPlusHover(false)}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2.5">
-            <path d="M12 5v14M5 12h14" />
-          </svg>
+        {/* Plus icon — Upload CSV / Train */}
+        <div className="relative">
+          <button
+            onClick={onShowCSV}
+            className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
+              plusHover ? 'border-terracotta' : 'border-neutral-border-inactive'
+            }`}
+            onMouseEnter={() => { setPlusHover(true); setShowPlusTooltip(true); }}
+            onMouseLeave={() => { setPlusHover(false); setShowPlusTooltip(false); }}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2.5">
+              <path d="M12 5v14M5 12h14" />
+            </svg>
+          </button>
+          {showPlusTooltip && (
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+              Upload CSV
+            </div>
+          )}
         </div>
 
-        {/* Table icon — Evaluation / Data view */}
-        <div
-          className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
-            tableHover ? 'border-terracotta' : 'border-neutral-border-inactive'
-          }`}
-          onMouseEnter={() => setTableHover(true)}
-          onMouseLeave={() => setTableHover(false)}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
-            <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4" />
-          </svg>
+        {/* Table icon — Model Evaluation */}
+        <div className="relative">
+          <button
+            onClick={onShowEval}
+            className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
+              tableHover ? 'border-terracotta' : 'border-neutral-border-inactive'
+            }`}
+            onMouseEnter={() => { setTableHover(true); setShowTableTooltip(true); }}
+            onMouseLeave={() => { setTableHover(false); setShowTableTooltip(false); }}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
+              <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4" />
+            </svg>
+          </button>
+          {showTableTooltip && (
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+              Model Evaluation
+            </div>
+          )}
         </div>
 
-        {/* Bar chart icon — Compare restaurants */}
-        <div
-          className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
-            chartHover ? 'border-terracotta' : 'border-neutral-border-inactive'
-          }`}
-          onMouseEnter={() => setChartHover(true)}
-          onMouseLeave={() => setChartHover(false)}
-        >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
-            <path d="M18 20V10M12 20V4M6 20v-6" />
-          </svg>
+        {/* Bar chart icon — Train Model */}
+        <div className="relative">
+          <button
+            onClick={onShowTrain}
+            className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
+              chartHover ? 'border-terracotta' : 'border-neutral-border-inactive'
+            }`}
+            onMouseEnter={() => { setChartHover(true); setShowChartTooltip(true); }}
+            onMouseLeave={() => { setChartHover(false); setShowChartTooltip(false); }}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
+              <path d="M18 20V10M12 20V4M6 20v-6" />
+            </svg>
+          </button>
+          {showChartTooltip && (
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+              Train Model
+            </div>
+          )}
         </div>
 
-       
+        {/* Settings icon — Model Configuration */}
+        <div className="relative">
+          <button
+            onClick={onShowSettings}
+            className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
+              settingHover ? 'border-terracotta' : 'border-neutral-border-inactive'
+            }`}
+            onMouseEnter={() => { setSettingHover(true); setShowSettingsTooltip(true); }}
+            onMouseLeave={() => { setSettingHover(false); setShowSettingsTooltip(false); }}
+            type="button"
+          >
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
+              <circle cx="12" cy="12" r="3" />
+              <path d="M12 1v2m0 16v2M4.22 4.22l1.41 1.41m9.9 9.9l1.41 1.41M1 12h2m16 0h2M4.22 19.78l1.41-1.41m9.9-9.9l1.41-1.41" />
+            </svg>
+          </button>
+          {showSettingsTooltip && (
+            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+              LLM Settings
+            </div>
+          )}
+        </div>
       </div>
     </header>
   );

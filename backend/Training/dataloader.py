@@ -33,9 +33,18 @@ def rating_to_label(rating):
 ####################################
 
 def load_csv(csv_path):
-    """Load absa_training.csv → (review, aspect, label) tuples"""
+    """Load absa_training.csv + synthetic_augmentation.csv if available → (review, aspect, label) tuples"""
 
     df = pd.read_csv(csv_path)
+
+    # Check for synthetic augmentation file
+    data_dir = os.path.dirname(csv_path)
+    synthetic_path = os.path.join(data_dir, 'synthetic_augmentation.csv')
+    if os.path.exists(synthetic_path):
+        synthetic_df = pd.read_csv(synthetic_path)
+        df = pd.concat([df, synthetic_df], ignore_index=True)
+        print(f"Combined with {len(synthetic_df)} synthetic samples from {synthetic_path}")
+
     samples = []
 
     for _, row in df.iterrows():
@@ -44,7 +53,7 @@ def load_csv(csv_path):
         label = rating_to_label(int(row['rating']))
         samples.append((review, aspect, label))
 
-    print(f"Loaded {len(samples)} samples from {csv_path}")
+    print(f"Loaded {len(samples)} total samples")
     return samples
 
 

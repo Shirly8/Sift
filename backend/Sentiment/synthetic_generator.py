@@ -1,29 +1,14 @@
 import csv
 import os
+from datetime import datetime, timedelta
 import random
-import pandas as pd
-import ollama
+from llm_client import LLMClient
 
 
-class SyntheticGenerator:
-    def __init__(self, model = "llama3:8b"):
-        self.model = model
+class EvaluationDataGenerator:
+    def __init__(self):
+        self.llm = LLMClient()
         self.data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
-        self.output_path = os.path.join(self.data_dir, 'synthetic_augmentation.csv')
-
-
-    # Aspect keywords for generation prompts
-    ASPECT_PHRASES = {
-        "Service": ["service", "wait times", "staff", "waiter", "waitress", "reservations"],
-        "Ambience": ["ambience", "atmosphere", "decor", "noise level", "lighting", "seating"],
-        "Price": ["pricing", "cost", "affordability", "value for money"],
-        "Food Quality": ["food quality", "freshness", "ingredients", "presentation"],
-        "Taste": ["taste", "flavor", "seasoning", "texture"],
-        "Menu": ["menu variety", "menu options", "selection of dishes"],
-        "Location": ["location", "accessibility", "parking"],
-        "Drinks": ["drinks", "cocktails", "wine", "beer", "beverages"],
-        "Desserts": ["desserts", "tiramisu", "panna cotta", "cheesecake", "gelato"],
-    }
 
     RATING_DESCRIPTIONS = {
         1: "a terrible, 1-star",
@@ -34,160 +19,124 @@ class SyntheticGenerator:
     }
 
 
+    def generate_review(self, restaurant_name, cuisine, rating, restaurant_description=None):
+        """Generate one synthetic review for a restaurant"""
 
-    ####################################
-    # STEP 1: ANALYZE GAPS IN REAL DATA
-    ####################################
-
-    def find_gaps(self, real_csv_path, min_per_aspect = 30, min_per_rating = 10):
-        """Check which aspects/ratings are underrepresented in real data"""
-
-        df = pd.read_csv(real_csv_path)
-
-        # Count reviews per aspect
-        aspect_counts = df['aspect'].value_counts().to_dict() if 'aspect' in df.columns else {}
-
-        gaps = []
-
-        for aspect in self.ASPECT_PHRASES.keys():
-            count = aspect_counts.get(aspect, 0)
-
-            if count < min_per_aspect:
-                needed = min_per_aspect - count
-                gaps.append({"aspect": aspect, "needed": needed, "current": count})
-
-        print(f"Found {len(gaps)} underrepresented aspects")
-        for g in gaps:
-            print(f"  {g['aspect']}: {g['current']} reviews (need {g['needed']} more)")
-
-        return gaps
-
-
-
-    ####################################
-    # STEP 2: GENERATE A SINGLE REVIEW
-    ####################################
-
-    def generate_review(self, aspect, rating):
-        """Generate one synthetic review for a specific aspect and rating"""
-
-        phrase = random.choice(self.ASPECT_PHRASES[aspect])
-        description = self.RATING_DESCRIPTIONS[rating]
+        rating_description = self.RATING_DESCRIPTIONS[rating]
 
         prompt = (
-            f"Write a single-sentence restaurant review that reflects {description} experience, "
-            f"focusing on '{phrase}'. Do not mention the star rating. Be natural and realistic."
+            f"Write a realistic restaurant review for '{restaurant_name}', "
+            f"a {cuisine} restaurant. The review should reflect {rating_description} dining experience. "
+        )
+
+        if restaurant_description:
+            prompt += f"The restaurant is described as: {restaurant_description}. "
+
+        prompt += (
+            "Include specific dish names or experience details. Be natural and realistic. "
+            "Do not mention the star rating explicitly."
         )
 
         try:
-            response = ollama.generate(model=self.model, prompt=prompt)
-            text = response['response'].strip().strip('"').strip("'")
-            return {"review": text, "aspect": aspect, "rating": rating}
+            text = self.llm.generate(prompt)
+            return text
         except Exception as e:
             print(f"Generation failed: {e}")
             return None
 
 
-
-    ####################################
-    # STEP 3: GENERATE BATCH FOR GAPS
-    ####################################
-
-    def fill_gaps(self, gaps):
-        """Generate reviews to fill underrepresented aspects"""
-
-        all_reviews = []
-
-        for gap in gaps:
-            aspect = gap['aspect']
-            needed = gap['needed']
-            print(f"\nGenerating {needed} reviews for '{aspect}'...")
-
-            for i in range(needed):
-                rating = random.randint(1, 5)
-                review = self.generate_review(aspect, rating)
-
-                if review:
-                    all_reviews.append(review)
-                    print(f"  [{i+1}/{needed}] {aspect} | {rating} star")
-
-        return all_reviews
+    def generate_random_date(self, days_back=30):
+        """Generate a random date within the last N days"""
+        today = datetime.now()
+        random_days = random.randint(0, days_back)
+        date = today - timedelta(days=random_days)
+        return date.strftime("%m/%d/%Y")
 
 
+    def generate_batch(self, restaurant_name, cuisine, count=10, restaurant_description=None):
+        """Generate N reviews for a restaurant with varying ratings"""
 
-    ####################################
-    # STEP 4: GENERATE FREELY (NO GAPS)
-    ####################################
+        reviews = []
 
-    def generate_batch(self, count = 100):
-        """Generate N reviews across random aspects and ratings"""
+        # Distribute reviews across rating spectrum
+        ratings = []
+        per_rating = count // 5
+        remainder = count % 5
 
-        all_reviews = []
+        for rating in range(1, 6):
+            ratings.extend([rating] * per_rating)
 
-        for i in range(count):
-            aspect = random.choice(list(self.ASPECT_PHRASES.keys()))
-            rating = random.randint(1, 5)
+        # Add remainder to higher ratings
+        for i in range(remainder):
+            ratings.append(5 - i)
 
-            review = self.generate_review(aspect, rating)
-            if review:
-                all_reviews.append(review)
-                print(f"[{i+1}/{count}] {aspect} | {rating} star")
+        random.shuffle(ratings)
 
-        return all_reviews
+        print(f"Generating {count} reviews for '{restaurant_name}' ({cuisine} cuisine)...\n")
 
+        for i, rating in enumerate(ratings):
+            review_text = self.generate_review(restaurant_name, cuisine, rating, restaurant_description)
 
-
-    ####################################
-    # STEP 5: WRITE TO CSV
-    ####################################
-
-    def write_csv(self, reviews):
-        """Write synthetic reviews to CSV"""
-
-        os.makedirs(self.data_dir, exist_ok=True)
-
-        with open(self.output_path, 'w', encoding='utf-8-sig', newline='') as f:
-            writer = csv.DictWriter(f, fieldnames=["review", "aspect", "rating"])
-            writer.writeheader()
-            writer.writerows(reviews)
-
-        print(f"\nWrote {len(reviews)} synthetic reviews to {self.output_path}")
-
-
-
-    ####################################
-    # STEP 6: RUN FULL PIPELINE
-    ####################################
-
-    def run(self, real_csv_path = None, count = 100):
-        """
-        If real_csv_path provided: analyze gaps and fill them
-        If not: generate freely
-        """
-
-        if real_csv_path and os.path.exists(real_csv_path):
-            print("Analyzing gaps in real data...")
-            gaps = self.find_gaps(real_csv_path)
-
-            if gaps:
-                reviews = self.fill_gaps(gaps)
+            if review_text:
+                reviews.append({
+                    "restaurant": restaurant_name,
+                    "review": review_text,
+                    "rating": rating,
+                    "date": self.generate_random_date()
+                })
+                print(f"[{i+1}/{count}] {rating}-star review generated")
             else:
-                print("No gaps found. Generating general batch instead.")
-                reviews = self.generate_batch(count)
-        else:
-            print("No real data provided. Generating general batch...")
-            reviews = self.generate_batch(count)
+                print(f"[{i+1}/{count}] Failed to generate review")
 
-        self.write_csv(reviews)
         return reviews
 
 
+    def write_csv(self, reviews, output_filename=None):
+        """Write evaluation reviews to CSV"""
+
+        os.makedirs(self.data_dir, exist_ok=True)
+
+        if not reviews:
+            print("No reviews to write. Check that LLM generation succeeded.")
+            return None
+
+        if output_filename is None:
+            output_filename = f"synthetic_{reviews[0]['restaurant'].lower()}.csv"
+
+        output_path = os.path.join(self.data_dir, output_filename)
+
+        with open(output_path, 'w', encoding='utf-8-sig', newline='') as f:
+            writer = csv.DictWriter(f, fieldnames=["restaurant", "review", "rating", "date"])
+            writer.writeheader()
+            writer.writerows(reviews)
+
+        print(f"\nWrote {len(reviews)} synthetic reviews to {output_path}")
+        return output_path
+
+
+    def generate_for_restaurant(self, restaurant_name, cuisine, count=10, output_filename=None, restaurant_description=None):
+        """Main method: generate and save evaluation data for a restaurant"""
+
+        reviews = self.generate_batch(restaurant_name, cuisine, count, restaurant_description)
+        output_path = self.write_csv(reviews, output_filename)
+
+        return reviews, output_path
 
 
 if __name__ == "__main__":
+    import sys
 
-    generator = SyntheticGenerator(model="llama3:8b")
+    # Parse command-line arguments
+    # Usage: python synthetic_generator.py <restaurant_name> <cuisine> <count> [description]
+    restaurant_name = sys.argv[1] if len(sys.argv) > 1 else "Aretti"
+    cuisine = sys.argv[2] if len(sys.argv) > 2 else "Italian"
+    count = int(sys.argv[3]) if len(sys.argv) > 3 else 10
+    description = sys.argv[4] if len(sys.argv) > 4 else None
 
-    real_data = os.path.join(os.path.dirname(__file__), '..', 'data', 'raw_reviews.csv')
-
-    generator.run(real_csv_path=real_data, count=100)
+    generator = EvaluationDataGenerator()
+    reviews, output_path = generator.generate_for_restaurant(
+        restaurant_name=restaurant_name,
+        cuisine=cuisine,
+        count=count,
+        restaurant_description=description
+    )

@@ -20,13 +20,6 @@ from impact_attribution import SENTIMENT_SCORE
 import evaluator
 
 
-RRESTAURANTS = {
-    "360 The Restaurant": "360.csv",
-    "Lavelle": "Lavelle.csv",
-    "McDonald's": "McDonalds.csv",
-    "Pai": "Pai.csv"
-}
-RESTAURANTS = list(RRESTAURANTS.values())
 
 
 
@@ -34,11 +27,11 @@ RESTAURANTS = list(RRESTAURANTS.values())
 # STEP 1: SCORE ALL REVIEWS
 ####################################
 
-def score_reviews(analyzer):
+def score_reviews(analyzer, restaurants):
 
     all_reviews = []
 
-    for csv_file in RESTAURANTS:
+    for csv_file in restaurants:
         path = os.path.join(DATA_DIR, csv_file)
         df   = pd.read_csv(path)
 
@@ -215,7 +208,7 @@ def save(filename, data):
 # MAIN: RUN FULL PIPELINE
 ####################################
 
-def run():
+def run(restaurants):
 
     os.makedirs(OUTPUT_DIR, exist_ok=True)
 
@@ -223,7 +216,7 @@ def run():
     analyzer = SemanticAnalyzer()
 
     #score all reviews
-    reviews = score_reviews(analyzer)
+    reviews = score_reviews(analyzer, restaurants)
     print(f"Total scored: {len(reviews)}\n")
 
     # Save per-restaurant files
@@ -263,4 +256,13 @@ def run():
 
 
 if __name__ == "__main__":
-    run()
+    import sys
+
+    if len(sys.argv) > 1:
+        # Process specific files passed as arguments
+        restaurants = sys.argv[1:]
+    else:
+        # Default to built-in restaurants
+        restaurants = ["360.csv", "Lavelle.csv", "McDonalds.csv", "Pai.csv"]
+
+    run(restaurants)

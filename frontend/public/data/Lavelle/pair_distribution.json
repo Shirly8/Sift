@@ -1,0 +1,101 @@
+{
+  "Service": {
+    "Service": 1.0,
+    "Ambience": 0.87,
+    "Price": 0.91,
+    "Food Quality": 0.86,
+    "Location": 0.56,
+    "Desserts": 0.95,
+    "Drinks": 0.89,
+    "Taste": 0.98,
+    "Menu": 0.93
+  },
+  "Ambience": {
+    "Service": 0.87,
+    "Ambience": 1.0,
+    "Price": 0.5,
+    "Food Quality": 0.84,
+    "Location": 1.0,
+    "Desserts": 0.86,
+    "Drinks": 0.96,
+    "Taste": 1.0,
+    "Menu": 0.84
+  },
+  "Price": {
+    "Service": 0.91,
+    "Ambience": 0.5,
+    "Price": 1.0,
+    "Food Quality": 0.83,
+    "Location": 0.0,
+    "Desserts": 1.0,
+    "Drinks": 0.83,
+    "Taste": 1.0,
+    "Menu": 0.0
+  },
+  "Food Quality": {
+    "Service": 0.86,
+    "Ambience": 0.84,
+    "Price": 0.83,
+    "Food Quality": 1.0,
+    "Location": 0.67,
+    "Desserts": 0.89,
+    "Drinks": 0.83,
+    "Taste": 0.9,
+    "Menu": 0.77
+  },
+  "Location": {
+    "Service": 0.56,
+    "Ambience": 1.0,
+    "Price": 0.0,
+    "Food Quality": 0.67,
+    "Location": 1.0,
+    "Desserts": 0.0,
+    "Drinks": 0.87,
+    "Taste": 1.0,
+    "Menu": 1.0
+  },
+  "Desserts": {
+    "Service": 0.95,
+    "Ambience": 0.86,
+    "Price": 1.0,
+    "Food Quality": 0.89,
+    "Location": 0.0,
+    "Desserts": 1.0,
+    "Drinks": 0.95,
+    "Taste": 0.93,
+    "Menu": 0.77
+  },
+  "Drinks": {
+    "Service": 0.89,
+    "Ambience": 0.96,
+    "Price": 0.83,
+    "Food Quality": 0.83,
+    "Location": 0.87,
+    "Desserts": 0.95,
+    "Drinks": 1.0,
+    "Taste": 0.96,
+    "Menu": 0.6
+  },
+  "Taste": {
+    "Service": 0.98,
+    "Ambience": 1.0,
+    "Price": 1.0,
+    "Food Quality": 0.9,
+    "Location": 1.0,
+    "Desserts": 0.93,
+    "Drinks": 0.96,
+    "Taste": 1.0,
+    "Menu": 0.64
+  },
+  "Menu": {
+    "Service": 0.93,
+    "Ambience": 0.84,
+    "Price": 0.0,
+    "Food Quality": 0.77,
+    "Location": 1.0,
+    "Desserts": 0.77,
+    "Drinks": 0.6,
+    "Taste": 0.64,
+    "Menu": 1.0
+  }
+}
