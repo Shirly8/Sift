@@ -10,7 +10,7 @@
 /Backend/Models
 /Backend/Training/__pycache__
 /Backend/Sentiment/__pycache__
-
+backend/Training/lightning_logs/
 
 /Frontend/node_modules
 /Frontend/build
