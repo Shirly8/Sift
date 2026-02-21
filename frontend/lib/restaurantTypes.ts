@@ -33,6 +33,7 @@ export interface RestaurantData {
   reviewData: ReviewRecord[];
   aspectSentiments: Record<string, AspectSentiment>;
   aspectTrends: AspectTrends;
+  pairDistribution: Record<string, Record<string, number>>;
 }
 
 

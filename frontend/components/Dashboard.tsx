@@ -30,7 +30,7 @@ export default function Dashboard() {
     <div className="font-sans bg-neutral-background min-h-screen text-neutral-text relative overflow-hidden">
       
       
-      {/* subtle noise texture overlay */}
+      {/*  texture overlay */}
       <div
         className="fixed inset-0 pointer-events-none z-0"
         style={{
@@ -38,6 +38,9 @@ export default function Dashboard() {
           backgroundSize: '200px 200px',
         }}
       />
+
+
+
       {/* MAIN CONTENT — centred, max-width, generous horizontal padding */}
       <div className="relative z-[1] max-w-[1320px] mx-auto px-28">
         {/* Header */}
@@ -60,9 +63,9 @@ export default function Dashboard() {
         >
           {/* LEFT COLUMN */}
           <div className="flex flex-col gap-16">
-            {/* What Drives Your Rating */}
             <RatingDrivers />
-            {/* BOTTOM ROW — Heatmap + Reviews side by side */}
+
+            {/* BOTTOM ROW — Heatmap + Pairwise side by side */}
             <div className="grid grid-cols-2 gap-16">
               <RatingHeatmap />
               <DistributionHeatmap />
@@ -70,17 +73,24 @@ export default function Dashboard() {
 
             <RecentReviews />
           </div>
-          {/* RIGHT COLUMN — Aspect Performance + Aspect Trends */}
-          <div className="flex flex-col gap-16">
-            <AspectPerformance />
-            <AspectTrends />
 
+
+          {/* RIGHT COLUMN — Aspect Performance: fixed viewport height, sticky */}
+          <div
+            className="flex flex-col self-start sticky top-6"
+            style={{ height: '205vh' }}
+          >
+            <AspectPerformance />
           </div>
         </div>
 
 
+        {/* ===== ASPECT TRENDS — full width ===== */}
+        <div className="mt-16" style={fadeIn(0.3)}>
+          <AspectTrends />
+        </div>
 
-        {/* ===== FOOTER ===== */}
+
         <div style={fadeIn(0.4)}>
           <Footer />
         </div>

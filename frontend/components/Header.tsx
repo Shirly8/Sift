@@ -16,6 +16,7 @@ export default function Header() {
   const [chartHover, setChartHover] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const portalRef = useRef<HTMLDivElement>(null);
   const [dropdownPos, setDropdownPos] = useState({ top: 0, left: 0 });
 
 
@@ -37,7 +38,7 @@ export default function Header() {
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
       const target = e.target as Node;
-      if (dropdownRef.current && !dropdownRef.current.contains(target) && !triggerRef.current?.contains(target)) {
+      if (dropdownRef.current && !dropdownRef.current.contains(target) && !triggerRef.current?.contains(target) && !portalRef.current?.contains(target)) {
         setDropdownOpen(false);
       }
     }
@@ -84,6 +85,7 @@ export default function Header() {
             typeof document !== 'undefined' &&
             createPortal(
               <div
+                ref={portalRef}
                 className="fixed py-2 bg-white border border-neutral-border-inactive rounded-lg min-w-[200px] z-[100000] drop-shadow-xl pointer-events-auto"
                 style={{
                   top: Math.max(dropdownPos.top, 0),

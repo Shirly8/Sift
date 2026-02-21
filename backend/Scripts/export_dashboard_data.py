@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import pandas as pd
+import numpy as np
 from collections import defaultdict
 from datetime import datetime
 
@@ -154,7 +155,52 @@ def build_aspect_trends(reviews):
 
 
 ####################################
-# STEP 4: SAVE JSON
+# STEP 4: BUILD PAIR DISTRIBUTION
+####################################
+
+def build_pair_distribution(reviews):
+    """Compute pairwise Pearson correlation between aspect sentiment scores per restaurant"""
+
+    # restaurant → aspect → list of numeric scores per review
+    raw = defaultdict(lambda: defaultdict(list))
+
+    for entry in reviews:
+        restaurant = entry['restaurant']
+        for aspect, label in entry['aspects'].items():
+            raw[restaurant][aspect].append(SENTIMENT_SCORE.get(label, 1))
+
+    result = {}
+    for restaurant, aspect_scores in raw.items():
+        aspects = list(aspect_scores.keys())
+        result[restaurant] = {}
+
+        for a in aspects:
+            result[restaurant][a] = {}
+            for b in aspects:
+                if a == b:
+                    result[restaurant][a][b] = 1.0
+                    continue
+
+                # Pair scores from reviews where both aspects appear
+                pairs_a, pairs_b = [], []
+                for entry in reviews:
+                    if entry['restaurant'] != restaurant:
+                        continue
+                    if a in entry['aspects'] and b in entry['aspects']:
+                        pairs_a.append(SENTIMENT_SCORE.get(entry['aspects'][a], 1))
+                        pairs_b.append(SENTIMENT_SCORE.get(entry['aspects'][b], 1))
+
+                if len(pairs_a) < 2:
+                    result[restaurant][a][b] = 0.0
+                else:
+                    corr = np.corrcoef(pairs_a, pairs_b)[0, 1]
+                    result[restaurant][a][b] = round(float(max(0, corr)), 2)
+
+    return result
+
+
+####################################
+# STEP 5: SAVE JSON
 ####################################
 
 def save(filename, data):
@@ -163,7 +209,6 @@ def save(filename, data):
     with open(path, 'w') as f:
         json.dump(data, f, indent=2)
     print(f"Saved → {filename}")
-
 
 
 ####################################
@@ -184,16 +229,19 @@ def run():
     # Save per-restaurant files
     aspect_sentiments = build_aspect_sentiments(reviews)
     aspect_trends = build_aspect_trends(reviews)
+    pair_distribution = build_pair_distribution(reviews)
 
     for restaurant in aspect_sentiments:
-        folder = os.path.join(OUTPUT_DIR, restaurant.replace(" ", "_").replace("'", "").replace(",", ""))
-        os.makedirs(folder, exist_ok=True)
-        save(os.path.join(restaurant.replace(" ", "_").replace("'", "").replace(",", ""), "aspect_sentiments.json"), aspect_sentiments[restaurant])
+        folder_name = restaurant.replace(" ", "_").replace("'", "").replace(",", "")
+        os.makedirs(os.path.join(OUTPUT_DIR, folder_name), exist_ok=True)
+        save(os.path.join(folder_name, "aspect_sentiments.json"), aspect_sentiments[restaurant])
         if restaurant in aspect_trends:
-            save(os.path.join(restaurant.replace(" ", "_").replace("'", "").replace(",", ""), "aspect_trends.json"), aspect_trends[restaurant])
+            save(os.path.join(folder_name, "aspect_trends.json"), aspect_trends[restaurant])
+        if restaurant in pair_distribution:
+            save(os.path.join(folder_name, "pair_distribution.json"), pair_distribution[restaurant])
         # Save reviews for this restaurant
         restaurant_reviews = [r for r in reviews if r['restaurant'] == restaurant]
-        save(os.path.join(restaurant.replace(" ", "_").replace("'", "").replace(",", ""), "review_data.json"), restaurant_reviews)
+        save(os.path.join(folder_name, "review_data.json"), restaurant_reviews)
 
     # Save global files
 

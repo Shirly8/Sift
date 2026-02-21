@@ -66,7 +66,7 @@ export default function RecentReviews() {
 
 
   return (
-    <div className="flex flex-col h-[1110px] overflow-hidden bg-white rounded-2xl border border-neutral-border">
+    <div className="flex flex-col max-h-[102vh] flex-1 overflow-hidden bg-white rounded-2xl border border-neutral-border">
 
       {/* HEADER row with filters beside */}
       <div className="pt-22 px-24 pb-12 shrink-0">

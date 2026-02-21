@@ -3,11 +3,30 @@
 import HBar from './HBar';
 import { useRestaurant } from '@/context/RestaurantContext';
 import { useMemo } from 'react';
+import { sentimentToScore } from '@/lib/restaurantData';
+import type { AspectSentiment } from '@/lib/restaurantTypes';
 
 const barColors = ['#CF5532', '#D4735A', '#D4915E', '#C4A87A', '#A8B0A0'];
 
+function generateInsight(aspectName: string, impactPct: number, s?: AspectSentiment): string {
+  if (!s || s.total === 0) {
+    return `${aspectName} explains ${impactPct}% of rating variance`;
+  }
+  const posRate = Math.round((s.Positive / s.total) * 100);
+  const negRate = Math.round((s.Negative / s.total) * 100);
+  const score = sentimentToScore(s.avg).toFixed(1);
+
+  if (negRate >= 25) {
+    return `${aspectName}: ${negRate}% negative sentiment · ${score}/5 avg · ${impactPct}% of variance`;
+  }
+  if (impactPct >= 25) {
+    return `${aspectName}: ${posRate}% positive · ${score}/5 avg · top driver (${impactPct}% variance)`;
+  }
+  return `${aspectName}: ${score}/5 avg · ${posRate}% positive across ${s.total} reviews`;
+}
+
 export default function RatingDrivers() {
-  const { impactAttribution } = useRestaurant();
+  const { impactAttribution, data } = useRestaurant();
 
   const drivers = useMemo(() => {
     if (!impactAttribution) return [];
@@ -47,7 +66,7 @@ export default function RatingDrivers() {
               <path d="M12 2v4M12 18v4M4.93 4.93l2.83 2.83M16.24 16.24l2.83 2.83M2 12h4M18 12h4M4.93 19.07l2.83-2.83M16.24 7.76l2.83-2.83" />
             </svg>
             <span className="text-sm font-semibold text-terracotta">
-              {topDriver.label} drives {topDriver.value}% of your rating
+              {generateInsight(topDriver.label, topDriver.value, data?.aspectSentiments?.[topDriver.label])}
             </span>
           </div>
         )}

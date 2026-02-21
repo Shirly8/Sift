@@ -111,7 +111,9 @@ export default function MetricsRow() {
         <div className="font-bold text-[16px] mt-8">{topStrength?.name ?? 'Food Quality'}</div>
 
         <div className="flex items-baseline gap-6 mt-2">
-          <span className="font-display text-[32px] text-neutral-text">{topStrength?.score ?? 4.6}</span>
+          <span className="font-display text-[32px] text-neutral-text">
+            <AnimatedNumber value={topStrength?.score ?? 4.6} />
+          </span>
           <span className="text-sm text-neutral-text-secondary">
             {formatTrendPercent(strengthTrend)}
           </span>
@@ -133,7 +135,9 @@ export default function MetricsRow() {
         <div className="font-bold text-[16px] mt-8">{topWeakness?.name ?? 'Service'}</div>
 
         <div className="flex items-baseline gap-6 mt-2">
-          <span className="font-display text-[32px] text-neutral-text">{topWeakness?.score ?? 2.8}</span>
+          <span className="font-display text-[32px] text-neutral-text">
+            <AnimatedNumber value={topWeakness?.score ?? 2.8} />
+          </span>
 
           <div className="flex items-center gap-3">
             {weaknessTrend < 0 && (

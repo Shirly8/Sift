@@ -88,6 +88,51 @@ export function formatTrendPercent(trend: number): string {
 }
 
 
+// ——— Pearson correlation between two arrays ———
+function pearson(xs: number[], ys: number[]): number {
+  const n = xs.length;
+  if (n < 2) return 0;
+  const mx = xs.reduce((a, b) => a + b, 0) / n;
+  const my = ys.reduce((a, b) => a + b, 0) / n;
+  let num = 0, dx = 0, dy = 0;
+  for (let i = 0; i < n; i++) {
+    num += (xs[i]! - mx) * (ys[i]! - my);
+    dx += (xs[i]! - mx) ** 2;
+    dy += (ys[i]! - my) ** 2;
+  }
+  const denom = Math.sqrt(dx * dy);
+  return denom === 0 ? (xs[0] === ys[0] ? 1 : 0) : num / denom;
+}
+
+const PAIR_SENTIMENT: Record<string, number> = { Positive: 2, Neutral: 1, Negative: 0 };
+
+// ——— Compute pairwise Pearson correlation between aspect sentiments ———
+export function computePairDistribution(
+  reviewData: ReviewRecord[]
+): Record<string, Record<string, number>> {
+  const aspects = Array.from(
+    new Set(reviewData.flatMap((r) => Object.keys(r.aspects ?? {})))
+  );
+
+  const result: Record<string, Record<string, number>> = {};
+  for (const a of aspects) {
+    result[a] = {};
+    for (const b of aspects) {
+      if (a === b) { result[a]![b] = 1; continue; }
+      const pairs: [number, number][] = [];
+      for (const r of reviewData) {
+        if (a in (r.aspects ?? {}) && b in (r.aspects ?? {})) {
+          pairs.push([PAIR_SENTIMENT[r.aspects[a]!] ?? 1, PAIR_SENTIMENT[r.aspects[b]!] ?? 1]);
+        }
+      }
+      const corr = pairs.length < 2 ? 0 : pearson(pairs.map((p) => p[0]), pairs.map((p) => p[1]));
+      result[a]![b] = Math.max(0, Math.round(corr * 100)) / 100;
+    }
+  }
+  return result;
+}
+
+
 // ——— Load single restaurant data ———
 export async function loadRestaurantData(id: string) {
   const base = `/data/${id}`;
@@ -98,12 +143,15 @@ export async function loadRestaurantData(id: string) {
     fetch(`${base}/aspect_trends.json`).then((r) => r.json()),
   ]);
 
+  const pairDistribution = computePairDistribution(reviewData);
+
   return {
     restaurantId: id,
     displayName: folderToDisplayName(id),
     reviewData,
     aspectSentiments,
     aspectTrends,
+    pairDistribution,
   };
 }
 

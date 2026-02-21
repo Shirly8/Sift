@@ -8,16 +8,25 @@ interface HBarProps {
   maxValue: number;
   color: string;
   delay?: number;
+  replay?: boolean;
 }
 
 // Horizontal bar that animates width on mount
-export default function HBar({ label, value, maxValue, color, delay = 0 }: HBarProps) {
+// When `replay` toggles to true, resets width to 0 then re-animates
+export default function HBar({ label, value, maxValue, color, delay = 0, replay }: HBarProps) {
   const [width, setWidth] = useState(0);
 
   useEffect(() => {
     const timer = setTimeout(() => setWidth((value / maxValue) * 100), 150 + delay);
     return () => clearTimeout(timer);
   }, [value, maxValue, delay]);
+
+  useEffect(() => {
+    if (!replay) return;
+    setWidth(0);
+    const timer = setTimeout(() => setWidth((value / maxValue) * 100), 80);
+    return () => clearTimeout(timer);
+  }, [replay]);
 
   return (
     <div className="flex items-center gap-12 mb-10">
@@ -37,7 +46,7 @@ export default function HBar({ label, value, maxValue, color, delay = 0 }: HBarP
           style={{
             background: color,
             width: `${width}%`,
-            transition: 'width 1s cubic-bezier(0.22, 1, 0.36, 1)',
+            transition: 'width 1.3s cubic-bezier(0.22, 1, 0.36, 1)',
           }}
         >
           {width > 15 && (

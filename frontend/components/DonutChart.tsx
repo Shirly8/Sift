@@ -54,7 +54,7 @@ export default function DonutChart({ value, max = 5, size = 48, stroke = 5, colo
         stroke={color} strokeWidth={stroke} strokeLinecap="round"
         strokeDasharray={circumference}
         strokeDashoffset={circumference * (1 - progress)}
-        style={{ transition: 'stroke-dashoffset 1.2s cubic-bezier(0.22, 1, 0.36, 1)' }}
+        style={{ transition: 'stroke-dashoffset 1.6s cubic-bezier(0.22, 1, 0.36, 1)' }}
       />
     </svg>
   );
