@@ -9,12 +9,16 @@ Result: {'Service': 'Positive', 'Ambience': 'Positive', 'Taste': 'Negative', 'Fo
 
 
 import os
+import sys
 import torch
 from sentence_transformers import SentenceTransformer, util
 from transformers import AutoTokenizer, AutoModelForSequenceClassification
 
+# Add parent directory to path
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
+from ModelManager import ModelManager
 
-MODEL_DIR = os.path.join(os.path.dirname(__file__), '../Models/absa-v1')
+model_manager = ModelManager()
 
 LABELS = {0: "Negative", 1: "Neutral", 2: "Positive"}
 
@@ -42,11 +46,17 @@ ASPECT_KEYWORDS = {
 
 class SemanticAnalyzer:
 
-    def __init__(self, model_dir=MODEL_DIR):
+    def __init__(self, model_dir=None):
+        # Use ModelManager to get the active model
+        if model_dir is None:
+            model_path, model_name = model_manager.get_active_model()
+            print(f"Loading model: {model_name}")
+        else:
+            model_path = model_dir
 
         #load trained ABSA model
-        self.tokenizer = AutoTokenizer.from_pretrained(model_dir)
-        self.model = AutoModelForSequenceClassification.from_pretrained(model_dir)
+        self.tokenizer = AutoTokenizer.from_pretrained(model_path)
+        self.model = AutoModelForSequenceClassification.from_pretrained(model_path)
         self.model.eval()
 
         #load sentence transformer for semantic similarity

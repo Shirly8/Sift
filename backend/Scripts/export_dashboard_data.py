@@ -17,7 +17,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), '../Evaluator'))
 from semantic_analyzer import SemanticAnalyzer
 import impact_attribution
 from impact_attribution import SENTIMENT_SCORE
-import evaluator
 
 
 
@@ -162,6 +161,19 @@ def build_pair_distribution(reviews):
         for aspect, label in entry['aspects'].items():
             raw[restaurant][aspect].append(SENTIMENT_SCORE.get(label, 1))
 
+    # Pre-compute co-occurrence pairs for each restaurant
+    co_occurrence = defaultdict(lambda: defaultdict(lambda: defaultdict(list)))
+    for entry in reviews:
+        restaurant = entry['restaurant']
+        aspects_in_review = list(entry['aspects'].keys())
+        for a in aspects_in_review:
+            for b in aspects_in_review:
+                if a != b:
+                    co_occurrence[restaurant][a][b].append((
+                        SENTIMENT_SCORE.get(entry['aspects'][a], 1),
+                        SENTIMENT_SCORE.get(entry['aspects'][b], 1)
+                    ))
+
     result = {}
     for restaurant, aspect_scores in raw.items():
         aspects = list(aspect_scores.keys())
@@ -174,18 +186,13 @@ def build_pair_distribution(reviews):
                     result[restaurant][a][b] = 1.0
                     continue
 
-                # Pair scores from reviews where both aspects appear
-                pairs_a, pairs_b = [], []
-                for entry in reviews:
-                    if entry['restaurant'] != restaurant:
-                        continue
-                    if a in entry['aspects'] and b in entry['aspects']:
-                        pairs_a.append(SENTIMENT_SCORE.get(entry['aspects'][a], 1))
-                        pairs_b.append(SENTIMENT_SCORE.get(entry['aspects'][b], 1))
+                # Use pre-computed co-occurrence pairs
+                pairs = co_occurrence[restaurant][a][b]
 
-                if len(pairs_a) < 2:
+                if len(pairs) < 2:
                     result[restaurant][a][b] = 0.0
                 else:
+                    pairs_a, pairs_b = zip(*pairs)
                     corr = np.corrcoef(pairs_a, pairs_b)[0, 1]
                     result[restaurant][a][b] = round(float(max(0, corr)), 2)
 
@@ -236,6 +243,12 @@ def run(restaurants):
         restaurant_reviews = [r for r in reviews if r['restaurant'] == restaurant]
         save(os.path.join(folder_name, "review_data.json"), restaurant_reviews)
 
+        # Calculate and save impact attribution for this restaurant only
+        restaurant_df = _build_scored_df_for_impact(restaurant_reviews)
+        if len(restaurant_df) > 0:
+            restaurant_impact = impact_attribution.compute_impact(restaurant_df)
+            save(os.path.join(folder_name, "impact_attribution.json"), restaurant_impact)
+
     # Save global files
 
     #impact attribution
@@ -247,22 +260,30 @@ def run(restaurants):
         print(f"  {aspect}: {pct*100:.1f}%")
     save("impact_attribution.json", impact)
 
-    #evaluation
-    print("\nRunning evaluation...")
-    evaluator.run(analyzer)
-
     print("\nAll done → frontend/public/data/")
 
 
 
 if __name__ == "__main__":
     import sys
+    import glob
 
     if len(sys.argv) > 1:
         # Process specific files passed as arguments
         restaurants = sys.argv[1:]
     else:
-        # Default to built-in restaurants
-        restaurants = ["360.csv", "Lavelle.csv", "McDonalds.csv", "Pai.csv"]
+        # Dynamically find all CSV files in the data folder, excluding Training folder
+        csv_files = glob.glob(os.path.join(DATA_DIR, '*.csv'))
+        # Filter out training files
+        csv_files = [f for f in csv_files if 'training' not in os.path.basename(f).lower()]
+        restaurants = [os.path.basename(f) for f in csv_files]
 
-    run(restaurants)
+        # If no CSVs found, fall back to Restaurants subdirectory
+        if not restaurants:
+            csv_files = glob.glob(os.path.join(DATA_DIR, 'Restaurants', '*.csv'))
+            restaurants = [os.path.join('Restaurants', os.path.basename(f)) for f in csv_files]
+
+    if restaurants:
+        run(restaurants)
+    else:
+        print("No CSV files found to process")

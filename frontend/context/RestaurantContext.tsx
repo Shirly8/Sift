@@ -72,7 +72,7 @@ export function RestaurantProvider({ children }: { children: ReactNode }) {
 
     Promise.all([
       loadRestaurantData(restaurantId),
-      loadImpactAttribution(),
+      loadImpactAttribution(restaurantId),
     ])
       .then(([restaurantData, attribution]) => {
         if (!cancelled) {

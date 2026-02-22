@@ -7,23 +7,24 @@ import AnimatedCount from './AnimatedCount';
 import { useRestaurant } from '@/context/RestaurantContext';
 
 interface HeaderProps {
-  onShowEval?: () => void;
   onShowCSV?: () => void;
   onShowTrain?: () => void;
   onShowSettings?: () => void;
+  currentTask?: string | null;
 }
 
-export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSettings }: HeaderProps = {}) {
+export default function Header({ onShowCSV, onShowTrain, onShowSettings, currentTask }: HeaderProps = {}) {
   const { data, restaurantOptions, setRestaurantId, restaurantId } = useRestaurant();
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const [settingHover, setSettingHover] = useState(false);
   const [plusHover, setPlusHover] = useState(false);
-  const [tableHover, setTableHover] = useState(false);
   const [chartHover, setChartHover] = useState(false);
   const [showSettingsTooltip, setShowSettingsTooltip] = useState(false);
   const [showPlusTooltip, setShowPlusTooltip] = useState(false);
-  const [showTableTooltip, setShowTableTooltip] = useState(false);
   const [showChartTooltip, setShowChartTooltip] = useState(false);
+  const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteTooltip, setDeleteTooltip] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const portalRef = useRef<HTMLDivElement>(null);
@@ -56,6 +57,44 @@ export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSetti
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [dropdownOpen]);
 
+
+  const handleDeleteRestaurant = async (id: string) => {
+    if (deleting) return;
+
+    setDeleting(true);
+    try {
+      const res = await fetch('/api/delete-restaurant', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ restaurantId: id }),
+      });
+
+      if (!res.ok) {
+        const error = await res.json();
+        alert(`Error: ${error.error || 'Failed to delete restaurant'}`);
+        setDeleting(false);
+        return;
+      }
+
+      setDeleteConfirm(null);
+
+      // If we deleted the current restaurant, switch to another one
+      if (id === restaurantId && restaurantOptions.length > 1) {
+        const nextRestaurant = restaurantOptions.find(opt => opt.id !== id);
+        if (nextRestaurant) {
+          setRestaurantId(nextRestaurant.id);
+        }
+      }
+
+      // Refresh the page to reload restaurant list
+      window.location.reload();
+    } catch (error) {
+      console.error('Delete error:', error);
+      alert('Failed to delete restaurant');
+    } finally {
+      setDeleting(false);
+    }
+  };
 
   return (
     <header className="flex items-center justify-between py-20 border-b border-neutral-border relative z-[100]">
@@ -123,18 +162,39 @@ export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSetti
               document.body
             )}
         </div>
+
+        <button
+          type="button"
+          onClick={() => setDeleteConfirm(restaurantId)}
+          className="text-neutral-text-muted hover:text-red-600 transition-colors"
+          title="Delete current restaurant"
+          style={{ cursor: 'pointer', padding: '6px' }}
+        >
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
+            <path d="M6 19c0 1.1.9 2 2 2h8c1.1 0 2-.9 2-2V7H6v12zM19 4h-3.5l-1-1h-9l-1 1H5v2h14V4z" />
+          </svg>
+        </button>
       </div>
 
 
 
-      {/* RIGHT SIDE — Reviews Badge + Icons */}
+      {/* RIGHT SIDE — Reviews Badge + Task Status + Icons */}
       <div className="flex items-center gap-16">
-        <div className="flex items-center gap-6 py-6 px-12 bg-neutral-hover rounded-md">
-          <div className="w-7 h-7 rounded-full bg-sage" />
-          <span className="text-base font-semibold text-neutral-text-muted">
-            <AnimatedCount value={totalReviews} /> reviews analyzed
-          </span>
-        </div>
+        {currentTask ? (
+          <div className="flex items-center gap-6 py-6 px-12 bg-amber-50 rounded-md border border-amber-200">
+            <div className="w-2 h-2 rounded-full bg-amber-600 animate-pulse" />
+            <span className="text-base font-semibold text-amber-900">
+              {currentTask}
+            </span>
+          </div>
+        ) : (
+          <div className="flex items-center gap-6 py-6 px-12 bg-neutral-hover rounded-md">
+            <div className="w-7 h-7 rounded-full bg-sage" />
+            <span className="text-base font-semibold text-neutral-text-muted">
+              <AnimatedCount value={totalReviews} /> reviews analyzed
+            </span>
+          </div>
+        )}
 
 
         {/* Plus icon — Upload CSV / Train */}
@@ -155,28 +215,6 @@ export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSetti
           {showPlusTooltip && (
             <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
               Upload CSV
-            </div>
-          )}
-        </div>
-
-        {/* Table icon — Model Evaluation */}
-        <div className="relative">
-          <button
-            onClick={onShowEval}
-            className={`w-36 h-36 rounded-lg border flex items-center justify-center cursor-pointer transition-[border-color] duration-[200ms] ${
-              tableHover ? 'border-terracotta' : 'border-neutral-border-inactive'
-            }`}
-            onMouseEnter={() => { setTableHover(true); setShowTableTooltip(true); }}
-            onMouseLeave={() => { setTableHover(false); setShowTableTooltip(false); }}
-            type="button"
-          >
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#6B6B6B" strokeWidth="2">
-              <path d="M9 3H5a2 2 0 00-2 2v4m6-6h10a2 2 0 012 2v4M9 3v18m0 0h10a2 2 0 002-2v-4M9 21H5a2 2 0 01-2-2v-4" />
-            </svg>
-          </button>
-          {showTableTooltip && (
-            <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-8 px-12 py-6 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
-              Model Evaluation
             </div>
           )}
         </div>
@@ -226,6 +264,59 @@ export default function Header({ onShowEval, onShowCSV, onShowTrain, onShowSetti
           )}
         </div>
       </div>
+
+      {/* Delete confirmation modal - rendered as portal to center on screen */}
+      {deleteConfirm &&
+        typeof document !== 'undefined' &&
+        createPortal(
+          <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-[200000] pointer-events-auto">
+            <div className="bg-white rounded-lg shadow-lg p-24 max-w-sm pointer-events-auto">
+              <h3 className="text-lg font-semibold text-neutral-text mb-8">
+                Delete Restaurant?
+              </h3>
+              <p className="text-sm text-neutral-text-secondary mb-16">
+                Are you sure you want to delete <strong>{restaurantOptions.find(opt => opt.id === deleteConfirm)?.displayName}</strong>? This will permanently remove all data and cannot be undone.
+              </p>
+              <div className="flex gap-12 justify-end">
+                <div className="relative">
+                  <button
+                    onClick={() => setDeleteConfirm(null)}
+                    disabled={deleting}
+                    onMouseEnter={() => deleting && setDeleteTooltip(true)}
+                    onMouseLeave={() => setDeleteTooltip(false)}
+                    className="px-16 py-8 border border-neutral-border-inactive rounded-lg text-sm font-medium text-neutral-text hover:bg-neutral-hover disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="button"
+                  >
+                    Cancel
+                  </button>
+                  {deleteTooltip && deleting && (
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-10 py-4 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+                      Task in progress...
+                    </div>
+                  )}
+                </div>
+                <div className="relative">
+                  <button
+                    onClick={() => handleDeleteRestaurant(deleteConfirm)}
+                    disabled={deleting}
+                    onMouseEnter={() => deleting && setDeleteTooltip(true)}
+                    onMouseLeave={() => setDeleteTooltip(false)}
+                    className="px-16 py-8 bg-red-600 rounded-lg text-sm font-medium text-white hover:bg-red-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                    type="button"
+                  >
+                    {deleting ? 'Deleting...' : 'Delete'}
+                  </button>
+                  {deleteTooltip && deleting && (
+                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-10 py-4 bg-neutral-text text-white rounded-md text-xs font-medium whitespace-nowrap shadow-lg z-50 animate-fade-in">
+                      Task in progress...
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          </div>,
+          document.body
+        )}
     </header>
   );
 }

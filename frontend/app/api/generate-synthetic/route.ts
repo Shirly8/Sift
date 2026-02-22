@@ -14,9 +14,10 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    return new Promise((resolve) => {
+    return new Promise<Response>((resolve) => {
       const pythonProcess = spawn('python3', [
         join(process.cwd(), '..', 'backend', 'Sentiment', 'synthetic_generator.py'),
+        'training',
         restaurantName,
         cuisine,
         String(count),

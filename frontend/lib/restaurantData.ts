@@ -157,7 +157,17 @@ export async function loadRestaurantData(id: string) {
 
 
 // ——— Load global impact attribution ———
-export async function loadImpactAttribution(): Promise<Record<string, number>> {
+export async function loadImpactAttribution(restaurantId?: string): Promise<Record<string, number>> {
+  // Load restaurant-specific impact attribution if available
+  if (restaurantId) {
+    try {
+      const r = await fetch(`/data/${restaurantId}/impact_attribution.json`);
+      if (r.ok) return r.json();
+    } catch {
+      // Fall back to global if not found
+    }
+  }
+  // Fall back to global impact attribution
   const r = await fetch('/data/impact_attribution.json');
   return r.json();
 }

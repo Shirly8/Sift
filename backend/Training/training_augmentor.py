@@ -21,22 +21,14 @@ from llm_client import LLMClient
 class SyntheticGenerator:
     def __init__(self):
         self.llm = LLMClient()
-        self.data_dir = os.path.join(os.path.dirname(__file__), '..', 'data')
+        self.data_dir = os.path.join(os.path.dirname(__file__), '..', '..', 'frontend', 'public', 'data')
         self.output_path = os.path.join(self.data_dir, 'synthetic_augmentation.csv')
 
 
-    # Aspect keywords for generation prompts
-    ASPECT_PHRASES = {
-        "Service": ["service", "wait times", "staff", "waiter", "waitress", "reservations"],
-        "Ambience": ["ambience", "atmosphere", "decor", "noise level", "lighting", "seating"],
-        "Price": ["pricing", "cost", "affordability", "value for money"],
-        "Food Quality": ["food quality", "freshness", "ingredients", "presentation"],
-        "Taste": ["taste", "flavor", "seasoning", "texture"],
-        "Menu": ["menu variety", "menu options", "selection of dishes"],
-        "Location": ["location", "accessibility", "parking"],
-        "Drinks": ["drinks", "cocktails", "wine", "beer", "beverages"],
-        "Desserts": ["desserts", "tiramisu", "panna cotta", "cheesecake", "gelato"],
-    }
+    ASPECTS = [
+        "Service", "Ambience", "Price", "Food Quality",
+        "Taste", "Menu", "Location", "Drinks", "Desserts",
+    ]
 
     RATING_DESCRIPTIONS = {
         1: "a terrible, 1-star",
@@ -62,7 +54,7 @@ class SyntheticGenerator:
 
         gaps = []
 
-        for aspect in self.ASPECT_PHRASES.keys():
+        for aspect in self.ASPECTS:
             count = aspect_counts.get(aspect, 0)
 
             if count < min_per_aspect:
@@ -84,12 +76,11 @@ class SyntheticGenerator:
     def generate_review(self, aspect, rating):
         """Generate one synthetic review for a specific aspect and rating"""
 
-        phrase = random.choice(self.ASPECT_PHRASES[aspect])
         description = self.RATING_DESCRIPTIONS[rating]
 
         prompt = (
             f"Write a single-sentence restaurant review that reflects {description} experience, "
-            f"focusing on '{phrase}'. Do not mention the star rating. Be natural and realistic."
+            f"focusing on '{aspect}'. Do not mention the star rating. Be natural and realistic."
         )
 
         try:
@@ -137,7 +128,7 @@ class SyntheticGenerator:
         all_reviews = []
 
         for i in range(count):
-            aspect = random.choice(list(self.ASPECT_PHRASES.keys()))
+            aspect = random.choice(self.ASPECTS)
             rating = random.randint(1, 5)
 
             review = self.generate_review(aspect, rating)

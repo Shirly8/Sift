@@ -10,3 +10,4 @@ flask
 sentence-transformers
 ollama
 langdetect
+sentencepiece

@@ -27,21 +27,20 @@ async function readEnvFile(): Promise<Record<string, string>> {
   }
 }
 
-// Proper CSV parser that handles quoted fields containing newlines
 function parseCSV(content: string): Record<string, string>[] {
-  const clean = content.replace(/^\uFEFF/, ''); // remove BOM
+  const clean = content.replace(/^\uFEFF/, '');
   let pos = 0;
 
   function parseField(): string {
     if (clean[pos] === '"') {
-      pos++; // skip opening quote
+      pos++;
       let val = '';
       while (pos < clean.length) {
         if (clean[pos] === '"' && clean[pos + 1] === '"') {
           val += '"';
           pos += 2;
         } else if (clean[pos] === '"') {
-          pos++; // skip closing quote
+          pos++;
           break;
         } else {
           val += clean[pos++];
@@ -101,13 +100,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Run synthetic generator — pass "evaluation" as type parameter
     const backendDir = join(process.cwd(), '..');
-    const args = ['evaluation', restaurantName, cuisine, count];
-    if (description) {
-      args.push(description);
-    }
-    const command = `cd "${backendDir}" && python3 backend/Sentiment/synthetic_generator.py ${args.map(arg => `"${arg}"`).join(' ')}`;
+    const args = ['training', restaurantName, cuisine, String(count)];
+    if (description) args.push(description);
+
+    const command = `cd "${backendDir}" && python3 backend/Sentiment/synthetic_generator.py ${args.map(a => `"${a}"`).join(' ')}`;
 
     try {
       // Read saved settings and pass to subprocess
@@ -121,32 +118,27 @@ export async function POST(request: NextRequest) {
       await execAsync(command, { env });
     } catch (err) {
       console.error('Generator error:', err);
-      return NextResponse.json(
-        { error: 'Failed to generate reviews' },
-        { status: 500 }
-      );
+      return NextResponse.json({ error: 'Failed to generate training data' }, { status: 500 });
     }
 
-    // Read the generated CSV file
-    const fileName = `synthetic_${restaurantName.toLowerCase().replace(/\s+/g, '_')}.csv`;
-    const filePath = join(backendDir, 'backend', 'data', fileName);
+    const filePath = join(backendDir, 'backend', 'data', 'synthetic_training.csv');
 
     try {
       const csvContent = await readFile(filePath, 'utf-8');
-      const reviews = parseCSV(csvContent);
+      const rows = parseCSV(csvContent);
 
-      if (reviews.length === 0) {
+      if (rows.length === 0) {
         return NextResponse.json(
-          { error: 'No reviews were generated. Please check your LLM configuration in Settings.' },
+          { error: 'No training data was generated. Please check your LLM configuration in Settings.' },
           { status: 500 }
         );
       }
 
       return NextResponse.json({
         success: true,
-        fileName,
-        reviews,
-        count: reviews.length,
+        fileName: 'synthetic_training.csv',
+        rows,
+        count: rows.length,
       });
     } catch (err) {
       console.error('Read file error:', err);
@@ -156,7 +148,7 @@ export async function POST(request: NextRequest) {
       );
     }
   } catch (error) {
-    console.error('Generate error:', error);
+    console.error('Generate-training error:', error);
     return NextResponse.json(
       { error: error instanceof Error ? error.message : 'Generation failed' },
       { status: 500 }

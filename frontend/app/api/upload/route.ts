@@ -1,10 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { writeFile, mkdir, readFile } from 'fs/promises';
 import { join } from 'path';
-import { exec } from 'child_process';
-import { promisify } from 'util';
-
-const execAsync = promisify(exec);
+import { spawn } from 'child_process';
 
 // Proper CSV parser that handles quoted fields containing newlines
 function parseCSV(content: string): Record<string, string>[] {
@@ -85,7 +82,7 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(bytes);
 
     // Determine save path
-    const backendDataDir = join(process.cwd(), '..', 'backend', 'Data');
+    const backendDataDir = join(process.cwd(), '..', 'backend', 'data');
     await mkdir(backendDataDir, { recursive: true });
 
     // Save the file
@@ -97,10 +94,36 @@ export async function POST(request: NextRequest) {
     const csvText = buffer.toString('utf-8');
     const rawReviews = parseCSV(csvText);
 
-    // Run the Python export script with the uploaded file
+    // Run the Python export script with the uploaded file and capture progress
     const backendDir = join(process.cwd(), '..');
-    await execAsync(`cd ${backendDir} && python3 backend/Scripts/export_dashboard_data.py "${fileName}"`).catch((err) => {
-      console.error('Export script error:', err);
+
+    await new Promise<void>((resolve, reject) => {
+      const exportProcess = spawn('python3',
+        ['backend/Scripts/export_dashboard_data.py', fileName],
+        { cwd: backendDir }
+      );
+
+      let stdoutBuffer = '';
+
+      exportProcess.stdout.on('data', (data) => {
+        const output = data.toString();
+        console.log('Export script output:', output);
+        stdoutBuffer += output;
+      });
+
+      exportProcess.stderr.on('data', (data) => {
+        console.error('Export script error:', data.toString());
+      });
+
+      exportProcess.on('close', (code) => {
+        if (code === 0) {
+          resolve();
+        } else {
+          reject(new Error(`Export script exited with code ${code}`));
+        }
+      });
+
+      exportProcess.on('error', reject);
     });
 
     // Try to read back analyzed review_data.json for richer results
