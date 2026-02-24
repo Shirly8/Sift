@@ -1,54 +1,18 @@
 'use client';
 
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef } from 'react';
 
 
-// build question suggestions from real analysis data
-function buildChips(analysisData) {
-  if (!analysisData) return [];
-
-  const chips = [];
-  const results = analysisData.results || {};
-  const profile = analysisData.profile || {};
-
-  // 1. top subscription — "What if I cancel X?"
-  const subs = results.subscription_hunter?.recurring || [];
-  if (subs.length > 0) {
-    const top = subs[0];
-    chips.push({ label: `What if I cancel ${top.merchant}?`, q: `What if I cancel ${top.merchant}?` });
-  }
-
-  // 2. biggest spending category — "Break down my X spending"
-  const categories = profile.category_breakdown || [];
-  if (categories.length > 0) {
-    const top = categories[0];
-    chips.push({ label: `Break down my ${top.label} spending`, q: `Break down my ${top.label} spending` });
-  }
-
-  // 3. payday pattern — "Do I spend more after payday?"
-  const payday = results.temporal_patterns?.payday;
-  if (payday?.payday_detected) {
-    chips.push({ label: 'Do I spend more after payday?', q: 'Do I spend more after payday?' });
-  }
-
-  // 4. spending spike — "Why was [month] so expensive?"
-  const spikes = results.anomaly_detection?.spending_spikes || [];
-  if (spikes.length > 0) {
-    const spike = spikes[0];
-    const month = spike.recent_month; // e.g. "2025-11"
-    chips.push({ label: `Why did ${spike.category} spike?`, q: `Why did ${spike.category} spike in ${month}?` });
-  }
-
-  // fallback if we have fewer than 2 data-driven chips
-  if (chips.length < 2) {
-    chips.push({ label: 'Where can I cut back?', q: 'Where can I cut back?' });
-  }
-
-  return chips.slice(0, 4);
-}
+// suggested questions
+const CHIPS = [
+  { label: 'What if I cancel Netflix?', q: 'What if I cancel Netflix?' },
+  { label: 'Why was August so expensive?', q: 'Why was August so expensive?' },
+  { label: 'Do I spend more after payday?', q: 'Do I spend more after payday?' },
+  { label: 'Where can I cut back?', q: 'Where can I cut back?' },
+];
 
 
-export default function AskSift({ sessionId, analysisData }) {
+export default function AskSift({ sessionId }) {
 
   const [input, setInput] = useState('');
   const [response, setResponse] = useState(null);
@@ -57,8 +21,6 @@ export default function AskSift({ sessionId, analysisData }) {
   const [toolLabel, setToolLabel] = useState('');
   const [toolDone, setToolDone] = useState(false);
   const responseRef = useRef(null);
-
-  const chips = useMemo(() => buildChips(analysisData), [analysisData]);
 
 
   async function handleAsk(question) {
@@ -71,6 +33,7 @@ export default function AskSift({ sessionId, analysisData }) {
     setTyping(true);
 
     try {
+      // call backend /api/ask
       const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -149,10 +112,10 @@ export default function AskSift({ sessionId, analysisData }) {
       </div>
 
 
-      {/* suggestion chips — generated from real data */}
-      {chipsVisible && chips.length > 0 && (
+      {/* suggestion chips */}
+      {chipsVisible && (
         <div className="flex gap-2 flex-wrap" style={{ marginTop: 12 }}>
-          {chips.map(c => (
+          {CHIPS.map(c => (
             <button key={c.q} className="chip" onClick={() => handleAsk(c.q)}>
               {c.label}
             </button>

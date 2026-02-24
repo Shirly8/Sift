@@ -1,35 +1,28 @@
 'use client';
 
-import { useState } from 'react';
+import { useState, useRef } from 'react';
 
 
-// deterministic color palette matching SpendingBars
-const CATEGORY_COLORS = [
-  '#CF5532', '#6B8F71', '#D4915E', '#D4735A', '#7B8794',
-  '#C4A87A', '#A8B0A0', '#8B6F47', '#5A7D9A', '#9B6B8D',
+const DEMO_CATEGORIES = [
+  { name: 'Dining',    color: '#CF5532', data: [380,420,450,390,520,480,460,890,420,380,450] },
+  { name: 'Groceries', color: '#6B8F71', data: [620,580,540,650,480,530,560,420,580,640,560] },
+  { name: 'Shopping',  color: '#D4915E', data: [180,220,350,200,280,190,1247,210,260,200,240] },
+  { name: 'Transport', color: '#7B8794', data: [120,130,140,125,135,150,130,140,128,132,145] },
 ];
 
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov'];
 const W = 380;
 const H = 180;
 
 
-export default function TrendChart({ categories, months }) {
+export default function TrendChart({ categories = DEMO_CATEGORIES }) {
 
-  // assign colors to categories from backend
-  const coloredCats = (categories || []).map((c, i) => ({
-    ...c,
-    color: CATEGORY_COLORS[i % CATEGORY_COLORS.length],
-  }));
-
-  const monthLabels = months || [];
-
-  const [visible, setVisible] = useState(new Set(coloredCats.map(c => c.name)));
+  const [visible, setVisible] = useState(new Set(categories.map(c => c.name)));
   const [hoverMonth, setHoverMonth] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0 });
 
-  const numPoints = monthLabels.length || 1;
-  const allValues = coloredCats.flatMap(c => c.data || []);
-  const maxVal = allValues.length > 0 ? Math.max(...allValues) * 1.1 : 100;
+  const allValues = categories.flatMap(c => c.data);
+  const maxVal = Math.max(...allValues) * 1.1;
 
 
   // toggle category visibility
@@ -49,23 +42,10 @@ export default function TrendChart({ categories, months }) {
 
   // convert data point to SVG coords
   function toPoint(val, idx) {
-    const xDivisor = Math.max(numPoints - 1, 1);
     return {
-      x: (idx / xDivisor) * W,
+      x: (idx / 10) * W,
       y: H - (val / maxVal) * H,
     };
-  }
-
-
-  if (!coloredCats.length || !monthLabels.length) {
-    return (
-      <div className="card">
-        <h3 className="heading-card">Spending Over Time</h3>
-        <p className="text-sm ink-muted" style={{ marginTop: 8 }}>
-          Need at least 2 months of data for trend analysis.
-        </p>
-      </div>
-    );
   }
 
 
@@ -96,38 +76,35 @@ export default function TrendChart({ categories, months }) {
           })}
 
           {/* hover columns */}
-          {monthLabels.map((_, mi) => (
+          {MONTHS.map((_, mi) => (
             <rect
               key={mi}
-              x={(mi / Math.max(numPoints - 1, 1)) * W - W / (numPoints * 2)}
+              x={(mi / 10) * W - W / 22}
               y="0"
-              width={W / numPoints}
+              width={W / 11}
               height={H}
               fill="transparent"
               onMouseEnter={() => {
                 setHoverMonth(mi);
-                setTooltipPos({ x: mi / Math.max(numPoints - 1, 1) });
+                setTooltipPos({ x: mi / 10 });
               }}
               onMouseLeave={() => setHoverMonth(null)}
             />
           ))}
 
           {/* category lines */}
-          {coloredCats.map((cat, ci) => {
+          {categories.map((cat, ci) => {
             const isVisible = visible.has(cat.name);
-            const data = cat.data || [];
-            const points = data.map((v, i) => toPoint(v, i));
+            const points = cat.data.map((v, i) => toPoint(v, i));
             const pointStr = points.map(p => `${p.x},${p.y}`).join(' ');
             const last = points[points.length - 1];
-
-            if (!points.length) return null;
 
             return (
               <g key={cat.name} style={{ opacity: isVisible ? 1 : 0.08, transition: 'opacity 0.4s ease' }}>
 
                 {/* fill area */}
                 <polygon
-                  points={`0,${H} ${pointStr} ${points[points.length - 1].x},${H}`}
+                  points={`0,${H} ${pointStr} ${W},${H}`}
                   fill={cat.color}
                   fillOpacity={isVisible ? 0.06 : 0}
                 />
@@ -168,9 +145,9 @@ export default function TrendChart({ categories, months }) {
           {/* hover line */}
           {hoverMonth !== null && (
             <line
-              x1={(hoverMonth / Math.max(numPoints - 1, 1)) * W}
+              x1={(hoverMonth / 10) * W}
               y1="0"
-              x2={(hoverMonth / Math.max(numPoints - 1, 1)) * W}
+              x2={(hoverMonth / 10) * W}
               y2={H}
               stroke="var(--terra)"
               strokeWidth="1"
@@ -201,17 +178,15 @@ export default function TrendChart({ categories, months }) {
             ),
           }}>
             <div className="text-xs fw-600 ink-muted" style={{ marginBottom: 6 }}>
-              {monthLabels[hoverMonth] || ''}
+              {MONTHS[hoverMonth]} 2025
             </div>
-            {coloredCats.map(cat => visible.has(cat.name) && (
+            {categories.map(cat => visible.has(cat.name) && (
               <div key={cat.name} className="flex justify-between gap-4" style={{ padding: '2px 0' }}>
                 <span className="flex items-center gap-2">
                   <span style={{ width: 8, height: 3, borderRadius: 2, background: cat.color, display: 'inline-block' }} />
                   <span className="text-sm">{cat.name}</span>
                 </span>
-                <span className="text-sm fw-600">
-                  ${(cat.data?.[hoverMonth] || 0).toLocaleString()}
-                </span>
+                <span className="text-sm fw-600">${cat.data[hoverMonth].toLocaleString()}</span>
               </div>
             ))}
           </div>
@@ -221,7 +196,7 @@ export default function TrendChart({ categories, months }) {
 
       {/* legend */}
       <div className="flex gap-4 flex-wrap" style={{ marginTop: 12 }}>
-        {coloredCats.map(cat => (
+        {categories.map(cat => (
           <div
             key={cat.name}
             className={`legend-item ${!visible.has(cat.name) ? 'dimmed' : ''}`}

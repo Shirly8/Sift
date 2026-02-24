@@ -3,40 +3,20 @@
 import { useState } from 'react';
 
 
-// map backend tool names to display names
-const TOOL_DISPLAY_NAMES = {
-  'temporal_patterns':      'Timing Patterns',
-  'anomaly_detection':      'Unusual Spending',
-  'subscription_hunter':    'Subscriptions',
-  'correlation_engine':     'Spending Links',
-  'spending_impact':        'Spending Drivers',
-};
+const DEMO_TOOLS = [
+  { name: 'Categorization',    time: '0.4s' },
+  { name: 'Timing Patterns',   time: '0.5s' },
+  { name: 'Unusual Spending',  time: '0.3s' },
+  { name: 'Subscriptions',     time: '0.4s' },
+  { name: 'Spending Links',    time: '0.3s' },
+  { name: 'Spending Drivers',  time: '0.4s' },
+];
 
 
-export default function AgentProgress({ toolsRun, toolsSkipped, executionTime, onToast }) {
+export default function AgentProgress({ toolsRun = DEMO_TOOLS, onToast }) {
 
-  // build tool list from backend data
-  const tools = (toolsRun || []).map(name => ({
-    name: TOOL_DISPLAY_NAMES[name] || name.replace(/_/g, ' '),
-    status: 'done',
-  }));
-
-  // add skipped tools
-  (toolsSkipped || []).forEach(t => {
-    tools.push({
-      name: TOOL_DISPLAY_NAMES[t.name] || t.name.replace(/_/g, ' '),
-      status: 'skipped',
-      reason: t.reason,
-    });
-  });
-
-  const doneCount = tools.filter(t => t.status === 'done').length;
-  const skippedCount = tools.filter(t => t.status === 'skipped').length;
-
-  const [steps, setSteps] = useState(tools.map(t => t.status));
-  const [status, setStatus] = useState(
-    `${doneCount} checks completed${skippedCount > 0 ? ` · ${skippedCount} skipped` : ''}`
-  );
+  const [steps, setSteps] = useState(toolsRun.map(() => 'done'));
+  const [status, setStatus] = useState(`${toolsRun.length} checks completed`);
   const [running, setRunning] = useState(false);
 
 
@@ -45,31 +25,17 @@ export default function AgentProgress({ toolsRun, toolsSkipped, executionTime, o
 
     setRunning(true);
     setStatus('Running analysis...');
-    setSteps(tools.map(() => 'pending'));
+    setSteps(toolsRun.map(() => 'pending'));
 
-    for (let i = 0; i < tools.length; i++) {
-      if (tools[i].status === 'skipped') {
-        setSteps(prev => prev.map((s, j) => j === i ? 'skipped' : s));
-        continue;
-      }
+    for (let i = 0; i < toolsRun.length; i++) {
       setSteps(prev => prev.map((s, j) => j === i ? 'running' : s));
       await new Promise(r => setTimeout(r, 400 + Math.random() * 300));
       setSteps(prev => prev.map((s, j) => j === i ? 'done' : s));
     }
 
-    setStatus(`${doneCount} checks completed${skippedCount > 0 ? ` · ${skippedCount} skipped` : ''}`);
+    setStatus(`${toolsRun.length} checks completed`);
     setRunning(false);
     if (onToast) onToast('Analysis complete');
-  }
-
-
-  if (!tools.length) {
-    return (
-      <div className="card">
-        <h3 className="heading-card" style={{ fontSize: 15 }}>Analysis Details</h3>
-        <p className="text-sm ink-muted" style={{ marginTop: 8 }}>No tools were run.</p>
-      </div>
-    );
   }
 
 
@@ -87,14 +53,11 @@ export default function AgentProgress({ toolsRun, toolsSkipped, executionTime, o
         </button>
       </div>
 
-      <p className="text-sm ink-muted" style={{ marginBottom: 10 }}>
-        {status}
-        {executionTime ? ` · ${executionTime}s` : ''}
-      </p>
+      <p className="text-sm ink-muted" style={{ marginBottom: 10 }}>{status}</p>
 
 
       {/* progress steps */}
-      {tools.map((tool, i) => (
+      {toolsRun.map((tool, i) => (
         <div key={tool.name} className="progress-step">
 
           {/* dot */}
@@ -106,11 +69,6 @@ export default function AgentProgress({ toolsRun, toolsSkipped, executionTime, o
             )}
             {steps[i] === 'running' && (
               <div className="spinner" style={{ width: 12, height: 12, borderWidth: '1.5px' }} />
-            )}
-            {steps[i] === 'skipped' && (
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="#A0A0A0" strokeWidth="2.5" strokeLinecap="round">
-                <path d="M18 6L6 18M6 6l12 12" />
-              </svg>
             )}
             {steps[i] === 'pending' && (
               <svg width="12" height="12" viewBox="0 0 24 24" fill="none" strokeWidth="2">
@@ -124,9 +82,9 @@ export default function AgentProgress({ toolsRun, toolsSkipped, executionTime, o
             {tool.name}
           </span>
 
-          {/* reason for skipped */}
+          {/* time */}
           <span className="text-xs ink-muted" style={{ marginLeft: 'auto' }}>
-            {steps[i] === 'skipped' && tool.reason ? tool.reason : ''}
+            {steps[i] === 'done' ? tool.time : ''}
           </span>
 
         </div>

@@ -5,22 +5,22 @@ import AnimatedNumber from './AnimatedNumber';
 import Sparkline from './Sparkline';
 
 
-export default function MetricsRow({ profile = {}, annualSavings = 0 }) {
+export default function MetricsRow({ profile = {} }) {
 
   const [totalOpen, setTotalOpen] = useState(false);
   const [avgOpen, setAvgOpen] = useState(false);
 
-  // all values from real backend data — no demo fallbacks
-  const totalSpent = Math.round(profile.total_spent || 0);
-  const monthlyTotals = profile.monthly_totals || [];
-  const monthsCount = profile.months_count || 0;
-  const monthlyAvg = Math.round(profile.monthly_average || 0);
-  const highestMonth = profile.highest_month || { amount: 0, month: '—' };
-  const lowestMonth = profile.lowest_month || { amount: 0, month: '—' };
-  const recentAvg = Math.round(profile.recent_3mo_avg || 0);
-  const trend = profile.spending_trend || '—';
-  const biggestSwing = profile.biggest_swing_category || { name: '—', min: 0, max: 0 };
-  const couldSave = annualSavings;
+  // extract from backend or use demo data
+  const totalSpent = profile.total_spent || 42360;
+  const monthlyTotals = profile.monthly_totals || [3200, 3450, 3620, 3780, 4100, 3890, 3950, 4250, 4480, 3700, 3940];
+  const monthsCount = profile.months_count || 11;
+  const monthlyAvg = profile.monthly_average || 3851;
+  const highestMonth = profile.highest_month || { amount: 4480, month: 'Sep' };
+  const lowestMonth = profile.lowest_month || { amount: 3200, month: 'Jan' };
+  const recentAvg = profile.recent_3mo_avg || 4040;
+  const trend = profile.spending_trend || 'Gradually rising';
+  const biggestSwing = profile.biggest_swing_category || { name: 'Dining Out', min: 380, max: 890 };
+  const couldSave = profile.annual_savings_potential || 2250;
 
 
   return (
@@ -65,11 +65,9 @@ export default function MetricsRow({ profile = {}, annualSavings = 0 }) {
           $<AnimatedNumber value={monthlyAvg} />
         </div>
 
-        {monthlyTotals.length >= 2 && (
-          <div style={{ marginTop: 8 }}>
-            <Sparkline data={monthlyTotals} color="#CF5532" />
-          </div>
-        )}
+        <div style={{ marginTop: 8 }}>
+          <Sparkline data={monthlyTotals} color="#CF5532" />
+        </div>
 
         {/* expand detail */}
         <div className={`metric-detail ${avgOpen ? 'open' : ''}`}>
@@ -113,15 +111,11 @@ export default function MetricsRow({ profile = {}, annualSavings = 0 }) {
         </div>
 
         <div className="flex items-baseline gap-2" style={{ marginTop: 8 }}>
-          <span className="num-large ink-sage">
-            {couldSave > 0 ? <><span>$</span><AnimatedNumber value={couldSave} /></> : '—'}
-          </span>
-          {couldSave > 0 && <span className="text-sm ink-muted">/ year</span>}
+          <span className="num-large ink-sage">$<AnimatedNumber value={couldSave} /></span>
+          <span className="text-sm ink-muted">/ year</span>
         </div>
 
-        <div className="text-sm ink-muted" style={{ marginTop: 4 }}>
-          {couldSave > 0 ? 'from subscriptions & price creep' : 'no savings opportunities detected'}
-        </div>
+        <div className="text-sm ink-muted" style={{ marginTop: 4 }}>from subscriptions alone</div>
       </div>
 
 

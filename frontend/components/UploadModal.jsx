@@ -7,7 +7,7 @@ const STEPS = [
   { key: 'detect',     label: 'Recognizing your bank format...' },
   { key: 'normalize',  label: 'Cleaning up transactions...' },
   { key: 'categorize', label: 'Sorting into categories...' },
-  { key: 'quality',    label: 'Checking everything looks right...' },
+  { key: 'analyze',    label: 'Analyzing spending patterns...' },
 ];
 
 
@@ -19,6 +19,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
   const [dragover, setDragover] = useState(false);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [analysisData, setAnalysisData] = useState(null);
   const fileInputRef = useRef(null);
 
 
@@ -68,10 +69,8 @@ export default function UploadModal({ open, onClose, onComplete }) {
 
       const data = await response.json();
 
-      // store session_id from response
-      if (data.session_id) {
-        setSessionId(data.session_id);
-      }
+      if (data.session_id) setSessionId(data.session_id);
+      if (data.analysis)  setAnalysisData(data.analysis);
 
       // simulate step progression for UX
       const steps = [0, 1, 2, 3];
@@ -213,7 +212,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
             <button
               className="btn btn--primary"
               style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => onComplete && onComplete(sessionId)}
+              onClick={() => onComplete && onComplete(sessionId, analysisData)}
             >
               Analyze My Spending
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">

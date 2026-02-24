@@ -1,62 +1,35 @@
 'use client';
 
 
-// pick an emoji based on the two categories
-function pickEmoji(catA, catB) {
-  const pair = `${catA} ${catB}`.toLowerCase();
-  if (pair.includes('grocer') && pair.includes('deliver')) return '🍳';
-  if (pair.includes('dining') && pair.includes('transport')) return '🍽️';
-  if (pair.includes('shopping') && pair.includes('dining')) return '🛍️';
-  if (pair.includes('entertainment')) return '🎬';
-  if (pair.includes('health')) return '🏃';
-  if (pair.includes('subscri')) return '📺';
-  if (pair.includes('transport')) return '🚗';
-  return '📊';
-}
-
-// generate a human-readable title from a correlation
-function buildTitle(corr) {
-  const r = corr.correlation;
-  const a = corr.category_a;
-  const b = corr.category_b;
-
-  if (r < -0.5) return `More ${a} = less ${b}`;
-  return `${a} and ${b} move together`;
-}
-
-
-export default function PatternCards({ correlations }) {
-
-  // transform backend correlation data into pattern cards
-  const patterns = (correlations || []).slice(0, 4).map(corr => {
-    const r = corr.correlation;
-    const isInverse = r < 0;
-    const isStrong = Math.abs(r) > 0.7;
-
-    return {
-      emoji: pickEmoji(corr.category_a, corr.category_b),
-      title: buildTitle(corr),
-      desc: corr.interpretation || `${corr.category_a} and ${corr.category_b} (r=${r})`,
-      strength: isStrong ? 'Strong pattern' : 'Moderate',
-      strengthClass: isStrong ? 'tag--high' : 'tag--medium',
-      direction: isInverse ? 'inverse' : 'correlated',
-    };
-  });
+const DEMO_PATTERNS = [
+  {
+    emoji: '🍳',
+    title: 'Cooking more = ordering less',
+    desc: 'When your grocery spending goes up, your delivery spending drops almost equally. The months you cook more, you save about <strong>$80</strong>.',
+    strength: 'Strong pattern',
+    strengthClass: 'tag--high',
+    direction: 'inverse',
+  },
+  {
+    emoji: '🍽️',
+    title: 'Dining out means getting there',
+    desc: 'Your dining and transport spending tend to rise together — going out to eat usually means paying for the ride too.',
+    strength: 'Moderate',
+    strengthClass: 'tag--medium',
+    direction: 'correlated',
+  },
+  {
+    emoji: '🛍️',
+    title: 'Shopping sprees include dinner',
+    desc: 'Months with higher shopping also have higher dining. Big spending days tend to include both.',
+    strength: 'Moderate',
+    strengthClass: 'tag--medium',
+    direction: 'correlated',
+  },
+];
 
 
-  if (!patterns.length) {
-    return (
-      <div className="card">
-        <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
-          <h3 className="heading-card">Patterns We Found</h3>
-        </div>
-        <p className="text-sm ink-muted" style={{ marginTop: 8 }}>
-          Need 3+ months and 3+ categories to detect spending patterns.
-        </p>
-      </div>
-    );
-  }
-
+export default function PatternCards({ patterns = DEMO_PATTERNS }) {
 
   return (
     <div className="card">
