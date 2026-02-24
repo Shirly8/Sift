@@ -1,5 +1,3 @@
 {
-  "buildCommand": "cd frontend && next build",
-  "outputDirectory": "frontend/.next",
-  "framework": "nextjs"
+  "root": "frontend"
 }
