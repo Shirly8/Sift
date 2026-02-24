@@ -1,21 +1,23 @@
-
-
-/Practice
+# Environment — API keys never get committed
 .env
-/sample.py
+.env.local
+.env*.local
 
+# Any cache or data 
+backend/Data/merchant_cache.json
+
+# Python
+backend/venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+
+# Next.js
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env
+
+# macOS
 .DS_Store
-/Backend/.env
-/Backend/Evaluator/__pycache__
-/Backend/Models
-/Backend/Training/__pycache__
-/Backend/Sentiment/__pycache__
-/Backend/Training/lightning_logs/
-/Backend/__pycache__
-
-/Frontend/node_modules
-/Frontend/build
-/Frontend/.env
-/Frontend/.DS_Store
-
-

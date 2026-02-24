@@ -1,0 +1,132 @@
+{
+    "Groceries": [
+        "LOBLAWS", "METRO", "SOBEYS", "SAFEWAY", "WHOLE FOODS", "WHOLEFDS",
+        "IGA", "FOOD BASICS", "FRESHCO", "FORTINOS", "NOFRILLS", "NO FRILLS",
+        "SUPERSTORE", "REAL CANADIAN", "T&T", "FARM BOY",
+        "LONGOS", "LONGO'S", "ZEHRS", "VALUMART", "VALU-MART",
+        "RABBA", "HIGHLAND FARMS", "NATIONS FRESH FOOD",
+        "SAVE-ON-FOODS", "SAVE ON FOODS", "PROVIGO", "MAXI", "SUPER C",
+        "CO-OP", "ADONIS", "H MART", "HMART", "PAT MART", "GALLERIA",
+        "FOODLAND", "VOILA", "PC EXPRESS",
+        "GROCERY", "PRODUCE", "MARKET"
+    ],
+    "Delivery": [
+        "UBER EATS", "UBEREATS", "DOORDASH", "DOOR DASH",
+        "SKIP THE DISHES", "SKIPTHEDISHES", "INSTACART",
+        "POSTMATES", "GRUBHUB",
+        "RITUAL", "FANTUAN", "CHOWBUS"
+    ],
+    "Dining": [
+        "MCDONALD", "TIM HORTONS", "TIMHORTONS", "STARBUCKS",
+        "SUBWAY", "HARVEYS", "HARVEY'S", "A&W", "WENDYS", "BURGER KING",
+        "PIZZA HUT", "DOMINOS", "PIZZA", "SUSHI", "RAMEN",
+        "RESTAURANT", "BISTRO", "CAFE", "COFFEE", "GRILL",
+        "KITCHEN", "EATERY", "DINER", "BRASSERIE", "BOULANGERIE",
+        "SECOND CUP", "TIMOTHY'S", "COUNTRY STYLE", "ROBIN'S DONUTS",
+        "POPEYES", "KFC", "TACO BELL", "FIVE GUYS", "SHAKE SHACK", "CHIPOTLE",
+        "ARBYS", "ARBY'S", "DAIRY QUEEN", "FRESHII", "PITA PIT", "MR. SUB",
+        "ARABICA", "BUBBLE TEA", "TEA SHOP", "CHATIME",
+        "BINGZ", "PIGEON CAFE", "DE MELLO", "DISTILLERY",
+        "MOLLY TEA", "BAR ",
+        "BOSTON PIZZA", "SWISS CHALET", "ST-HUBERT", "MONTANA'S",
+        "EAST SIDE MARIO", "THE KEG", "MILESTONES", "EARLS", "JOEY", "MOXIE'S",
+        "JACK ASTOR", "KELSEY'S", "MARY BROWN", "CORA", "NANDO'S", "FATBURGER",
+        "SHAWARMA", "PHO", "WOK", "THAI", "TAVERN", "PUB"
+    ],
+    "Transport": [
+        "UBER", "LYFT", "TTC", "PRESTO", "TRANSIT",
+        "SHELL", "ESSO", "PETRO-CANADA", "PETROCAN",
+        "SUNOCO", "HUSKY", "GAS STATION", "PARKING",
+        "GO TRANSIT", "VIA RAIL", "WESTJET", "AIR CANADA",
+        "PORTER AIRLINES", "FLAIR AIRLINES",
+        "ZIPCAR", "CAR2GO", "COMMUNAUTO",
+        "CANADIAN TIRE GAS",
+        "ULTRAMAR", "PIONEER", "MOBIL", "CHEVRON",
+        "OC TRANSPO", "STM", "TRANSLINK", "MIWAY", "YRT",
+        "ENTERPRISE RENT", "HERTZ", "BUDGET RENT",
+        "SWOOP", "FLAIR"
+    ],
+    "Subscriptions": [
+        "NETFLIX", "SPOTIFY", "APPLE.COM/BILL", "APPLE SUBSCRIPTION",
+        "GOOGLE ONE", "GOOGLE PLAY", "YOUTUBE PREMIUM",
+        "DISNEY+", "DISNEYPLUS", "CRAVE", "PRIME VIDEO", "AMAZON PRIME",
+        "HULU", "HBO MAX", "PARAMOUNT+", "PEACOCK",
+        "ADOBE", "MICROSOFT 365", "OFFICE 365",
+        "DROPBOX", "ICLOUD", "GITHUB", "NOTION", "FIGMA",
+        "DUOLINGO", "HEADSPACE", "CALM",
+        "CLAUDE.AI", "OPENAI", "CHATGPT",
+        "CANVA", "ZOOM", "SLACK", "LINEAR", "VERCEL",
+        "DIGITALOCEAN", "NAMECHEAP", "GODADDY",
+        "SUBSCRIPTION", "MONTHLY PLAN", "ANNUAL PLAN"
+    ],
+    "Shopping": [
+        "AMAZON", "AMZN", "EBAY", "ETSY",
+        "BEST BUY", "BESTBUY", "HOME DEPOT",
+        "IKEA", "COSTCO", "WALMART", "WAL-MART", "THE BAY", "WINNERS",
+        "H&M", "ZARA", "ARITZIA", "LULULEMON", "NIKE", "ADIDAS",
+        "SEPHORA", "SHOPPERS", "REXALL",
+        "DOLLARAMA", "DOLLAR TREE", "MINISO",
+        "SPORT CHEK", "MEC",
+        "INDIGO", "CHAPTERS",
+        "UNIQLO", "GAP", "OLD NAVY", "BANANA REPUBLIC",
+        "CANADIAN TIRE",
+        "ROOTS", "SIMONS", "MARKS", "MARK'S", "STAPLES", "BUREAU EN GROS",
+        "STRUCTUBE", "WAYFAIR", "MICHAEL'S", "SAIL", "HUDSON'S BAY",
+        "MARSHALLS", "HOMESENSE", "TOMMY HILFIGER", "LEVI'S", "MUJI"
+    ],
+    "Entertainment": [
+        "CINEPLEX", "AMC THEATRE", "TICKETMASTER", "EVENTBRITE",
+        "STEAM", "PLAYSTATION", "XBOX", "NINTENDO",
+        "BOWLERO", "ESCAPE ROOM",
+        "TWITCH", "PATREON",
+        "WONDERLAND", "GREAT WOLF", "RIPLEY'S", "CN TOWER",
+        "MUSEUM", "GALLERY", "CONCERT", "THEATRE", "COMEDY",
+        "DAVE AND BUSTER", "TOPGOLF", "ROUND1"
+    ],
+    "Health": [
+        "SHOPPERS DRUG", "LONDON DRUGS", "GUARDIAN PHARMACY",
+        "GOODLIFE", "YMCA", "EQUINOX",
+        "GYM", "DOCTOR", "DENTIST", "OPTOMETRIST", "PHARMACY",
+        "MEDICAL", "CLINIC", "PHYSIO", "MASSAGE",
+        "OTHERSHIP", "F45", "ORANGETHEORY", "PELOTON",
+        "PLANET FITNESS", "ANYTIME FITNESS",
+        "LIFELABS", "DYNACARE", "WELL.CA", "REXALL PHARMA",
+        "CHIROPRACT", "THERAPIST", "COUNSELL"
+    ],
+    "Bills & Utilities": [
+        "BELL", "ROGERS", "TELUS", "FIDO", "KOODO", "FREEDOM MOBILE",
+        "VIRGIN MOBILE", "VIRGIN PLUS", "CHATR", "PUBLIC MOBILE",
+        "SHAW", "COGECO", "TEKSAVVY", "BEANFIELD", "START.CA",
+        "HYDRO ONE", "TORONTO HYDRO", "BC HYDRO", "HYDRO QUEBEC",
+        "ENBRIDGE", "ALECTRA", "FORTISBC",
+        "WATER BILL", "UTILITY", "UTILITIES",
+        "INTERNET", "PHONE BILL", "MOBILE BILL"
+    ],
+    "Rent & Housing": [
+        "RENT", "MORTGAGE", "PROPERTY TAX", "CONDO FEE", "CONDO CORP",
+        "STRATA", "LANDLORD", "LEASE", "HOUSING"
+    ],
+    "Education": [
+        "TUITION", "UNIVERSITY", "COLLEGE", "SCHOOL",
+        "UDEMY", "COURSERA", "SKILLSHARE", "MASTERCLASS", "LINKEDIN LEARNING",
+        "TEXTBOOK", "CHEGG", "BOOKSTORE"
+    ],
+    "Insurance": [
+        "SUN LIFE", "MANULIFE", "GREAT-WEST LIFE", "CANADA LIFE",
+        "INTACT INSURANCE", "DESJARDINS INSURANCE", "AVIVA",
+        "INSURANCE", "INSUR", "PREMIUM"
+    ],
+    "Personal Care": [
+        "SALON", "BARBER", "SPA", "NAILS", "HAIR",
+        "BEAUTY", "WAXING", "LASER", "DERMA",
+        "BATH AND BODY", "BATH & BODY"
+    ],
+    "Income": [
+        "PAYROLL", "DIRECT DEPOSIT", "SALARY",
+        "E-TRANSFER FROM", "TRANSFER IN", "DEPOSIT"
+    ],
+    "Transfer": [
+        "E-TRANSFER TO", "TRANSFER OUT", "INTERAC",
+        "WIRE TRANSFER", "PAYMENT TO"
+    ]
+}
