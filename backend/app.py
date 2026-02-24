@@ -71,7 +71,7 @@ def serialize_for_json(obj):
         return [serialize_for_json(item) for item in obj]
     elif pd.isna(obj):
         return None
-    elif isinstance(obj, (np.integer, np.floating)):
+    elif isinstance(obj, (np.integer, np.floating, np.bool_)):
         return obj.item()
     elif isinstance(obj, (pd.Timestamp, pd.Timedelta)):
         return str(obj)
@@ -179,7 +179,17 @@ def upload():
             _save_db(db, DB_PATH)
 
 
-        # store session for /analyze — evict oldest if over limit
+        # run full analysis pipeline
+        analysis = None
+        try:
+            analysis = run_agent(df)
+            analysis["insights"] = synthesize_insights(
+                analysis["results"], analysis["profile"], call_llm,
+            )
+        except Exception as e:
+            print(f"Analysis failed during upload: {e}")
+
+        # store session for /api/ask — evict oldest if over limit
         session_id = str(uuid.uuid4())
 
         if len(_sessions) >= MAX_SESSIONS:
@@ -188,7 +198,7 @@ def upload():
 
         _sessions[session_id] = {
             "df":               df,
-            "analysis_results": None,
+            "analysis_results": analysis,
             "created_at":       time.time(),
         }
 
@@ -196,7 +206,6 @@ def upload():
             "status":       "success",
             "session_id":   session_id,
             "format_type":  format_type,
-            "transactions": df.fillna(None).to_dict(orient="records"),
             "summary": {
                 "total":        len(df),
                 "categorized":  categorized,
@@ -209,7 +218,7 @@ def upload():
                     "days":  int((end - start).days),
                 },
             },
-            "llm_candidates": needs_llm[:50],
+            "analysis": analysis,
         }
         return jsonify(serialize_for_json(response_data))
 
@@ -240,6 +249,8 @@ def analyze():
     session_id = data.get("session_id")
     if session_id and session_id in _sessions:
         df = _sessions[session_id]["df"]
+    elif session_id and session_id not in _sessions:
+        return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
     elif "transactions" in data:
         df = pd.DataFrame(data["transactions"])
     else:

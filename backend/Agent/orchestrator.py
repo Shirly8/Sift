@@ -77,57 +77,21 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     # recent 3-month average
     recent_3mo = monthly.tail(3).mean() if len(monthly) >= 3 else monthly_avg
 
-    # category breakdown — per-category monthly stats for frontend charts
-    category_breakdown = []
-    monthly_by_category = []
-    month_labels = []
-
+    # category breakdown for biggest swing
     if "category" in df_spend.columns:
-        spend_only = df_spend[~df_spend["category"].str.lower().isin(["income", "transfer", ""])]
+        cat_spend = df_spend.groupby("category")["amount"].agg(['min', 'max', 'mean'])
+        cat_spend['swing'] = cat_spend['max'] - cat_spend['min']
+        cat_spend = cat_spend.sort_values('swing', ascending=False)
 
-        # per-category monthly totals for stats
-        cat_monthly = spend_only.groupby(["category", "month"])["amount"].sum().reset_index()
-        cat_stats = cat_monthly.groupby("category")["amount"].agg(["mean", "min", "max", "sum", "count"])
-        cat_stats["swing"] = cat_stats["max"] - cat_stats["min"]
-        cat_stats = cat_stats.sort_values("mean", ascending=False)
-
-        # biggest swing
-        if len(cat_stats) > 0:
-            swing_sorted = cat_stats.sort_values("swing", ascending=False)
-            biggest = swing_sorted.iloc[0]
+        if len(cat_spend) > 0:
+            biggest = cat_spend.iloc[0]
             biggest_swing_category = {
-                "name": swing_sorted.index[0],
-                "min": round(float(biggest["min"])),
-                "max": round(float(biggest["max"])),
+                "name": cat_spend.index[0],
+                "min": float(biggest['min']),
+                "max": float(biggest['max']),
             }
         else:
             biggest_swing_category = {"name": "N/A", "min": 0, "max": 0}
-
-        # full category breakdown for SpendingBars
-        for cat_name, row in cat_stats.iterrows():
-            category_breakdown.append({
-                "label": cat_name,
-                "avg": round(float(row["mean"])),
-                "min": round(float(row["min"])),
-                "max": round(float(row["max"])),
-                "total": round(float(row["sum"])),
-                "months": int(row["count"]),
-            })
-
-        # monthly by category for TrendChart (top 6 categories)
-        if months_count >= 2:
-            pivot = spend_only.pivot_table(
-                index="month", columns="category", values="amount",
-                aggfunc="sum", fill_value=0,
-            )
-            month_labels = [str(p.strftime("%b")) for p in pivot.index]
-            top_cats = pivot.sum().sort_values(ascending=False).head(6).index.tolist()
-            for cat_name in top_cats:
-                if cat_name in pivot.columns:
-                    monthly_by_category.append({
-                        "name": cat_name,
-                        "data": [round(float(v)) for v in pivot[cat_name].values],
-                    })
     else:
         biggest_swing_category = {"name": "N/A", "min": 0, "max": 0}
 
@@ -154,9 +118,7 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
         "recent_3mo_avg": float(recent_3mo) if len(monthly) >= 3 else monthly_avg,
         "spending_trend": spending_trend,
         "biggest_swing_category": biggest_swing_category,
-        "category_breakdown": category_breakdown,
-        "monthly_by_category": monthly_by_category,
-        "month_labels": month_labels,
+        "annual_savings_potential": 0,  # placeholder for future calculation
     }
 
 
