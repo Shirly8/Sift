@@ -1,28 +1,26 @@
 'use client';
 
-import { useState, useRef } from 'react';
+import { useState } from 'react';
 
 
-const DEMO_CATEGORIES = [
-  { name: 'Dining',    color: '#CF5532', data: [380,420,450,390,520,480,460,890,420,380,450] },
-  { name: 'Groceries', color: '#6B8F71', data: [620,580,540,650,480,530,560,420,580,640,560] },
-  { name: 'Shopping',  color: '#D4915E', data: [180,220,350,200,280,190,1247,210,260,200,240] },
-  { name: 'Transport', color: '#7B8794', data: [120,130,140,125,135,150,130,140,128,132,145] },
-];
-
-const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov'];
 const W = 380;
 const H = 180;
 
 
-export default function TrendChart({ categories = DEMO_CATEGORIES }) {
+export default function TrendChart({ categories, months }) {
 
-  const [visible, setVisible] = useState(new Set(categories.map(c => c.name)));
+  const [visible, setVisible] = useState(new Set((categories || []).map(c => c.name)));
   const [hoverMonth, setHoverMonth] = useState(null);
   const [tooltipPos, setTooltipPos] = useState({ x: 0 });
 
+  // no data = don't render (after hooks)
+  if (!categories || !categories.length) return null;
+
+  const monthLabels = months || categories[0].data.map((_, i) => `M${i + 1}`);
+  const dataLen = monthLabels.length;
+
   const allValues = categories.flatMap(c => c.data);
-  const maxVal = Math.max(...allValues) * 1.1;
+  const maxVal = Math.max(...allValues, 1) * 1.1; // guard against all-zero data
 
 
   // toggle category visibility
@@ -41,9 +39,10 @@ export default function TrendChart({ categories = DEMO_CATEGORIES }) {
 
 
   // convert data point to SVG coords
+  const lastIdx = Math.max(dataLen - 1, 1);
   function toPoint(val, idx) {
     return {
-      x: (idx / 10) * W,
+      x: (idx / lastIdx) * W,
       y: H - (val / maxVal) * H,
     };
   }
@@ -76,17 +75,17 @@ export default function TrendChart({ categories = DEMO_CATEGORIES }) {
           })}
 
           {/* hover columns */}
-          {MONTHS.map((_, mi) => (
+          {monthLabels.map((_, mi) => (
             <rect
               key={mi}
-              x={(mi / 10) * W - W / 22}
+              x={(mi / lastIdx) * W - W / (dataLen * 2)}
               y="0"
-              width={W / 11}
+              width={W / dataLen}
               height={H}
               fill="transparent"
               onMouseEnter={() => {
                 setHoverMonth(mi);
-                setTooltipPos({ x: mi / 10 });
+                setTooltipPos({ x: mi / lastIdx });
               }}
               onMouseLeave={() => setHoverMonth(null)}
             />
@@ -104,7 +103,7 @@ export default function TrendChart({ categories = DEMO_CATEGORIES }) {
 
                 {/* fill area */}
                 <polygon
-                  points={`0,${H} ${pointStr} ${W},${H}`}
+                  points={`0,${H} ${pointStr} ${(points.length - 1) / lastIdx * W},${H}`}
                   fill={cat.color}
                   fillOpacity={isVisible ? 0.06 : 0}
                 />
@@ -145,9 +144,9 @@ export default function TrendChart({ categories = DEMO_CATEGORIES }) {
           {/* hover line */}
           {hoverMonth !== null && (
             <line
-              x1={(hoverMonth / 10) * W}
+              x1={(hoverMonth / lastIdx) * W}
               y1="0"
-              x2={(hoverMonth / 10) * W}
+              x2={(hoverMonth / lastIdx) * W}
               y2={H}
               stroke="var(--terra)"
               strokeWidth="1"
@@ -178,9 +177,9 @@ export default function TrendChart({ categories = DEMO_CATEGORIES }) {
             ),
           }}>
             <div className="text-xs fw-600 ink-muted" style={{ marginBottom: 6 }}>
-              {MONTHS[hoverMonth]} 2025
+              {monthLabels[hoverMonth]}
             </div>
-            {categories.map(cat => visible.has(cat.name) && (
+            {categories.map(cat => visible.has(cat.name) && cat.data[hoverMonth] != null && (
               <div key={cat.name} className="flex justify-between gap-4" style={{ padding: '2px 0' }}>
                 <span className="flex items-center gap-2">
                   <span style={{ width: 8, height: 3, borderRadius: 2, background: cat.color, display: 'inline-block' }} />

@@ -1,35 +1,22 @@
 'use client';
 
 
-const DEMO_PATTERNS = [
-  {
-    emoji: '🍳',
-    title: 'Cooking more = ordering less',
-    desc: 'When your grocery spending goes up, your delivery spending drops almost equally. The months you cook more, you save about <strong>$80</strong>.',
-    strength: 'Strong pattern',
-    strengthClass: 'tag--high',
-    direction: 'inverse',
-  },
-  {
-    emoji: '🍽️',
-    title: 'Dining out means getting there',
-    desc: 'Your dining and transport spending tend to rise together — going out to eat usually means paying for the ride too.',
-    strength: 'Moderate',
-    strengthClass: 'tag--medium',
-    direction: 'correlated',
-  },
-  {
-    emoji: '🛍️',
-    title: 'Shopping sprees include dinner',
-    desc: 'Months with higher shopping also have higher dining. Big spending days tend to include both.',
-    strength: 'Moderate',
-    strengthClass: 'tag--medium',
-    direction: 'correlated',
-  },
-];
+// Safe text renderer — parses **bold** without dangerouslySetInnerHTML
+function SafeDesc({ text }) {
+  if (!text) return null;
+  const parts = text.split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    return <span key={i}>{part}</span>;
+  });
+}
 
 
-export default function PatternCards({ patterns = DEMO_PATTERNS }) {
+export default function PatternCards({ patterns }) {
+
+  if (!patterns || !patterns.length) return null;
 
   return (
     <div className="card">
@@ -47,7 +34,10 @@ export default function PatternCards({ patterns = DEMO_PATTERNS }) {
       {/* pattern cards */}
       <div className="flex flex-col gap-3">
         {patterns.map(p => (
-          <div key={p.title} className="pattern-card">
+          <div
+            key={p.title}
+            style={{ padding: '14px 16px', background: 'var(--bg)', borderRadius: 'var(--r-md)' }}
+          >
             <div className="flex gap-3">
 
               {/* emoji icon */}
@@ -62,10 +52,10 @@ export default function PatternCards({ patterns = DEMO_PATTERNS }) {
               <div className="flex-1">
                 <div className="flex items-center gap-2" style={{ marginBottom: 4 }}>
                   <span className="text-md fw-700">{p.title}</span>
-                </div>
-                <div className="text-sm ink-mid" style={{ lineHeight: 1.6 }} dangerouslySetInnerHTML={{ __html: p.desc }} />
-                <div style={{ marginTop: 6 }}>
                   <span className={`tag ${p.strengthClass}`}>{p.strength}</span>
+                </div>
+                <div className="text-sm ink-mid" style={{ lineHeight: 1.6 }}>
+                  <SafeDesc text={p.desc} />
                 </div>
               </div>
 

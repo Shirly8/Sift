@@ -58,7 +58,7 @@ def _detect_provider() -> tuple:
         return "gemini", os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
 
     # default: Ollama (local, no key needed)
-    return "ollama", os.getenv("OLLAMA_MODEL", "llama3.2")
+    return "ollama", os.getenv("OLLAMA_MODEL", "llama3.1:8b")
 
 
 
@@ -85,7 +85,10 @@ def initialize_llm_client(provider: str = None):
 def _call_claude(prompt, model, temperature, max_tokens) -> str:
     if "claude" not in _clients:
         import anthropic
-        _clients["claude"] = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
+        _clients["claude"] = anthropic.Anthropic(
+            api_key=os.environ["ANTHROPIC_API_KEY"],
+            timeout=30.0,
+        )
 
     response = _clients["claude"].messages.create(
         model=model, max_tokens=max_tokens, temperature=temperature,
@@ -230,28 +233,14 @@ def extract_json(raw: str) -> str:
 
 def _track_usage(input_tokens: int, output_tokens: int, model: str):
     global _session_cost, _session_tokens
-    cost             = estimate_cost(input_tokens, output_tokens, model)
+    cost             = _estimate_cost(input_tokens, output_tokens, model)
     _session_cost   += cost
     _session_tokens += input_tokens + output_tokens
     if _session_cost > COST_WARN:
         print(f"Warning: Session LLM cost at ${_session_cost:.2f}")
 
 
-def estimate_cost(input_tokens: int, output_tokens: int, model: str = None) -> float:
+def _estimate_cost(input_tokens: int, output_tokens: int, model: str = None) -> float:
     prices = PRICING.get(model, {"input": 0.0, "output": 0.0})
     return (input_tokens / 1_000_000) * prices["input"] + \
            (output_tokens / 1_000_000) * prices["output"]
-
-
-def get_session_cost() -> float:
-    return round(_session_cost, 4)
-
-
-def get_session_tokens() -> int:
-    return _session_tokens
-
-
-def reset_session():
-    global _session_cost, _session_tokens
-    _session_cost   = 0.0
-    _session_tokens = 0

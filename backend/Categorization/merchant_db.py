@@ -15,8 +15,7 @@ import json
 from datetime import datetime
 
 
-DB_PATH          = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
-EXPORT_THRESHOLD = 50    # min user corrections per category before exporting as rules
+DB_PATH = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
 
 
 
@@ -75,61 +74,8 @@ def update_from_user_correction(merchant: str, correct_category: str, db_path: s
 
 
 ####################################
-# STEP 4: SAVE RESULT TO CACHE
+# STEP 4: SAVE DB
 ####################################
-
-def save_to_cache(merchant: str, category: str, confidence: float, db_path: str = DB_PATH):
-
-    db = load_merchant_db(db_path)
-
-    # never overwrite user-verified entries
-    existing = db.get(merchant.upper(), {})
-    if existing.get("user_verified"):
-        return
-
-    db[merchant.upper()] = {
-        "category":      category,
-        "confidence":    confidence,
-        "last_verified": datetime.now().strftime("%Y-%m-%d"),
-        "user_verified": False,
-    }
-
-    _save_db(db, db_path)
-
-
-
-####################################
-# STEP 5: EXPORT LEARNED RULES
-####################################
-
-def export_learned_rules(db_path: str = DB_PATH) -> dict:
-
-    db = load_merchant_db(db_path)
-
-    category_counts    = {}
-    category_merchants = {}
-
-    for merchant, entry in db.items():
-        if not entry.get("user_verified"):
-            continue
-
-        cat = entry["category"]
-        category_counts[cat]    = category_counts.get(cat, 0) + 1
-        category_merchants[cat] = category_merchants.get(cat, []) + [merchant]
-
-    # only export categories that hit the threshold
-    exportable = {
-        cat: merchants
-        for cat, merchants in category_merchants.items()
-        if category_counts[cat] >= EXPORT_THRESHOLD
-    }
-
-    if exportable:
-        print(f"Exportable learned rules: {list(exportable.keys())}")
-
-    return exportable
-
-
 
 def _save_db(db: dict, db_path: str):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)

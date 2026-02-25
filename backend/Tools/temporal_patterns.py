@@ -23,13 +23,11 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
     amounts = df["amount"].astype(float)
 
 
-    # find income deposits (large positive — top 5% or > $500)
-    # income rows have category "Income" if categorized, else look for large amounts
+    # find income deposits — only reliable with category data
     if "category" in df.columns:
-        income_mask = df["category"].str.lower() == "income"
+        income_mask = df["category"].fillna("").str.lower() == "income"
     else:
-        threshold   = max(amounts.quantile(0.95), 500)
-        income_mask = amounts >= threshold
+        return {"payday_detected": False, "reason": "No category data — cannot identify income deposits"}
 
     income_dates = dates[income_mask].sort_values()
 
@@ -39,7 +37,7 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
 
     # spending = everything that's NOT income/transfer
     if "category" in df.columns:
-        spend_mask = ~df["category"].str.lower().isin(["income", "transfer"])
+        spend_mask = ~df["category"].fillna("").str.lower().isin(["income", "transfer"])
     else:
         spend_mask = ~income_mask
 
@@ -98,7 +96,7 @@ def detect_weekly_pattern(df: pd.DataFrame) -> dict:
 
     # filter to spending only
     if "category" in df.columns:
-        mask    = ~df["category"].str.lower().isin(["income", "transfer"])
+        mask    = ~df["category"].fillna("").str.lower().isin(["income", "transfer"])
         dates   = dates[mask]
         amounts = amounts[mask]
 

@@ -603,6 +603,34 @@ ul, ol { list-style: none }
 
 
 /* ================================================================
+   ANOMALY ROW
+   ================================================================ */
+
+.anomaly-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 12px 0;
+  border-bottom: 1px solid var(--surface-alt);
+  transition: background var(--dur-fast) ease;
+}
+.anomaly-row:last-child { border-bottom: none }
+.anomaly-row:hover {
+  background: var(--bg);
+  margin: 0 -12px; padding: 12px 12px;
+  border-radius: var(--r-md);
+}
+
+.anomaly-icon {
+  width: 32px; height: 32px; border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  flex-shrink: 0;
+}
+.anomaly-icon--spike   { background: var(--rose-light); color: var(--rose) }
+.anomaly-icon--outlier { background: var(--amber-light); color: var(--amber) }
+.anomaly-icon--new     { background: rgba(43,108,176,0.1); color: #2B6CB0 }
+
+
+
+/* ================================================================
    AGENT PROGRESS
    ================================================================ */
 
@@ -766,57 +794,6 @@ ul, ol { list-style: none }
 
 
 
-/* ================================================================
-   SETTINGS PANEL
-   ================================================================ */
-
-.settings-panel {
-  position: fixed; top: 0; right: 0; bottom: 0; z-index: 1001;
-  width: 360px; max-width: 90vw;
-  background: var(--card);
-  box-shadow: -10px 0 40px rgba(26,26,46,0.1);
-  transform: translateX(100%);
-  transition: transform 0.4s var(--ease-out);
-  overflow-y: auto;
-}
-.settings-panel.open { transform: translateX(0) }
-
-.settings-backdrop {
-  position: fixed; inset: 0; z-index: 1000;
-  background: rgba(26,26,46,0.2);
-  opacity: 0; pointer-events: none;
-  transition: opacity 0.3s ease;
-}
-.settings-backdrop.open { opacity: 1; pointer-events: auto }
-
-.settings-group { padding: 0 24px 20px; border-bottom: 1px solid var(--border) }
-.settings-group:last-child { border-bottom: none }
-.settings-group__title {
-  font-size: var(--fs-xs); font-weight: 600; text-transform: uppercase;
-  letter-spacing: 0.08em; color: var(--ink-muted); margin-bottom: 12px;
-}
-
-.toggle {
-  position: relative; width: 40px; height: 22px;
-  background: var(--surface-alt); border-radius: 11px;
-  cursor: pointer; transition: background 0.25s ease;
-  flex-shrink: 0;
-}
-.toggle.on { background: var(--terra) }
-.toggle__knob {
-  position: absolute; top: 2px; left: 2px;
-  width: 18px; height: 18px; border-radius: 50%;
-  background: #fff; box-shadow: 0 1px 3px rgba(0,0,0,0.15);
-  transition: transform 0.25s var(--ease-spring);
-}
-.toggle.on .toggle__knob { transform: translateX(18px) }
-
-.setting-row {
-  display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 0;
-}
-.setting-row__label { font-size: var(--fs-base); font-weight: 500 }
-.setting-row__desc  { font-size: var(--fs-sm); color: var(--ink-muted); margin-top: 2px }
 
 
 

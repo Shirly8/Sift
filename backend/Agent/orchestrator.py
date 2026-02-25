@@ -10,6 +10,7 @@ This is what makes Sift agentic — it adapts to your data instead of running a 
   -> {"tools_run": ["anomaly_detection", ...], "tools_skipped": [("correlation_engine", "need 3+ months")], ...}
 """
 
+import json
 import time
 import pandas as pd
 
@@ -21,6 +22,7 @@ from Tools.anomaly_detector       import detect_transaction_outliers, detect_spe
 from Tools.subscription_hunter    import detect_recurring_charges, detect_price_creep, detect_subscription_overlap
 from Tools.behavioral_correlation import calculate_category_correlations
 from Tools.spending_impact        import fit_impact_model
+from LLM.client                   import call_llm, extract_json
 
 
 # tool requirements — hard constraints
@@ -108,6 +110,25 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     else:
         spending_trend = "Insufficient data"
 
+    # income + savings rate
+    monthly_income   = 0
+    monthly_spending = 0
+    savings_rate     = 0
+
+    if "category" in df_spend.columns:
+        spend_mask  = ~df_spend["category"].fillna("").str.lower().isin(["income", "transfer", ""])
+        income_mask = df_spend["category"].fillna("").str.lower() == "income"
+
+        spend_monthly  = df_spend[spend_mask].groupby("month")["amount"].sum()
+        income_monthly = df_spend[income_mask].groupby("month")["amount"].sum()
+
+        if len(spend_monthly) > 0:
+            monthly_spending = float(spend_monthly.mean())
+        if len(income_monthly) > 0:
+            monthly_income = float(income_monthly.mean())
+        if monthly_income > 0:
+            savings_rate = round(((monthly_income - monthly_spending) / monthly_income) * 100, 1)
+
     return {
         "total_spent": total_spent,
         "monthly_totals": monthly_totals,
@@ -118,7 +139,10 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
         "recent_3mo_avg": float(recent_3mo) if len(monthly) >= 3 else monthly_avg,
         "spending_trend": spending_trend,
         "biggest_swing_category": biggest_swing_category,
-        "annual_savings_potential": 0,  # placeholder for future calculation
+        "annual_savings_potential": 0,
+        "monthly_income": round(monthly_income, 2),
+        "monthly_spending": round(monthly_spending, 2),
+        "savings_rate": savings_rate,
     }
 
 
@@ -134,7 +158,7 @@ def profile_data(df: pd.DataFrame) -> dict:
 
     has_income = False
     if "category" in df.columns:
-        has_income = df["category"].str.lower().eq("income").any()
+        has_income = df["category"].fillna("").str.lower().eq("income").any()
 
     profile = {
         "transaction_count": len(df),
@@ -161,6 +185,74 @@ def profile_data(df: pd.DataFrame) -> dict:
 # STEP 2: PLAN ANALYSIS
 ####################################
 
+TOOL_DESCRIPTIONS = {
+    "temporal_patterns":   "Detects payday spending cycles, weekly patterns, and seasonal trends",
+    "anomaly_detection":   "Finds outlier transactions and sudden spending spikes by category",
+    "subscription_hunter": "Identifies recurring charges, price creep, and overlapping subscriptions",
+    "correlation_engine":  "Finds which spending categories move together or inversely over time",
+    "spending_impact":     "Determines which categories drive the most month-to-month variance",
+}
+
+
+def _llm_prioritize_tools(profile: dict, enabled_tools: list) -> dict:
+    """
+    Let the LLM reason about which enabled tools are most likely to surface
+    insights given this specific data profile. LLM cannot override hard
+    guardrails — it only orders and annotates tools that already passed them.
+
+    Returns: {tool_name: {"priority": int, "reasoning": str}}
+    """
+
+    tool_list = "\n".join(
+        f"- {t['name']}: {TOOL_DESCRIPTIONS.get(t['name'], '')}"
+        for t in enabled_tools
+    )
+
+    profile_summary = (
+        f"Transactions: {profile['transaction_count']}\n"
+        f"Date range: {profile['date_range_days']} days "
+        f"({profile['start_date']} to {profile['end_date']})\n"
+        f"Categories: {', '.join(profile.get('categories', []))}\n"
+        f"Has income data: {profile.get('has_income', False)}\n"
+        f"Monthly average spend: ${profile.get('monthly_average', 0):.0f}\n"
+        f"Spending trend: {profile.get('spending_trend', 'unknown')}\n"
+        f"Highest swing category: {profile.get('biggest_swing_category', {}).get('name', 'unknown')}"
+    )
+
+    prompt = f"""You are analyzing a user's financial transaction data profile to decide which analysis tools will surface the most meaningful insights.
+
+AVAILABLE TOOLS (all have confirmed sufficient data):
+{tool_list}
+
+DATA PROFILE:
+{profile_summary}
+
+TASK:
+Order these tools by expected insight value for this specific dataset. Consider:
+- High transaction counts + many merchants → subscription_hunter likely productive
+- High variance in monthly totals → spending_impact and correlation_engine worth running
+- Income data present → temporal_patterns (payday detection) is meaningful
+- Short date ranges → deprioritize tools that need long histories
+
+Return JSON only — a list ordered by priority (1 = run first):
+[{{"name": "tool_name", "priority": 1, "reasoning": "one sentence"}}]"""
+
+    try:
+        raw    = call_llm(prompt, temperature=0.0, max_tokens=300)
+        parsed = json.loads(extract_json(raw))
+
+        # build lookup: tool_name -> {priority, reasoning}
+        return {
+            item["name"]: {"priority": item["priority"], "reasoning": item.get("reasoning", "")}
+            for item in parsed
+            if isinstance(item, dict) and "name" in item
+        }
+
+    except Exception as e:
+        print(f"LLM planning failed ({e}) — using default order")
+        return {}
+
+
 def plan_analysis(profile: dict) -> dict:
 
     tools = []
@@ -170,28 +262,21 @@ def plan_analysis(profile: dict) -> dict:
         enabled = True
         reason  = ""
 
-        # check date range
+        # hard guardrails — LLM cannot override these
         min_days = reqs.get("min_days", 0)
         if profile["date_range_days"] < min_days:
             enabled = False
             reason  = f"Need {min_days}+ days, have {profile['date_range_days']}"
 
-        # check category count
         min_cats = reqs.get("min_categories", 0)
         if profile["category_count"] < min_cats:
             enabled = False
             reason  = f"Need {min_cats}+ categories, have {profile['category_count']}"
 
-        # check transaction count
         min_txns = reqs.get("min_transactions", 0)
         if profile["transaction_count"] < min_txns:
             enabled = False
             reason  = f"Need {min_txns}+ transactions, have {profile['transaction_count']}"
-
-        # payday detection needs income
-        if tool_name == "temporal_patterns" and not profile.get("has_income"):
-            # still run — weekly/seasonal don't need income
-            pass
 
         if enabled:
             reason = "requirements met"
@@ -202,13 +287,30 @@ def plan_analysis(profile: dict) -> dict:
             "reason":  reason,
         })
 
+    # LLM reasoning: order and annotate enabled tools based on data profile
+    enabled_tools = [t for t in tools if t["enabled"]]
+    if enabled_tools:
+        llm_plan = _llm_prioritize_tools(profile, enabled_tools)
+
+        for t in tools:
+            if t["enabled"] and t["name"] in llm_plan:
+                t["priority"]  = llm_plan[t["name"]]["priority"]
+                t["reasoning"] = llm_plan[t["name"]]["reasoning"]
+            elif t["enabled"]:
+                t["priority"]  = 99
+                t["reasoning"] = ""
+
+        # sort enabled tools by LLM priority, keep skipped at the end
+        tools.sort(key=lambda t: (not t["enabled"], t.get("priority", 99)))
+
     enabled_count = sum(1 for t in tools if t["enabled"])
     skipped_count = sum(1 for t in tools if not t["enabled"])
 
     print(f"\nAgent plan: {enabled_count} tools enabled, {skipped_count} skipped")
     for t in tools:
         status = "✅" if t["enabled"] else "❌"
-        print(f"  {status} {t['name']:25} — {t['reason']}")
+        note   = f" → {t['reasoning']}" if t.get("reasoning") else ""
+        print(f"  {status} [{t.get('priority', '-')}] {t['name']:25} — {t['reason']}{note}")
 
     return {"tools": tools}
 
@@ -218,7 +320,11 @@ def plan_analysis(profile: dict) -> dict:
 # STEP 3: EXECUTE PLAN
 ####################################
 
-def execute_analysis_plan(df: pd.DataFrame, plan: dict) -> dict:
+def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dict:
+
+    def emit(step):
+        if on_progress:
+            on_progress({"step": step})
 
     # drop uncategorized rows — NaN categories would skew every tool
     df = df[df["category"].notna() & (df["category"] != "")].copy()
@@ -237,6 +343,8 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict) -> dict:
             tools_skipped.append({"name": name, "reason": tool["reason"]})
             continue
 
+        label = TOOL_DISPLAY_NAMES.get(name, name)
+        emit(label + "...")
         print(f"\nRunning: {name}...")
 
         try:
@@ -294,16 +402,34 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict) -> dict:
 # STEP 4: RUN FULL PIPELINE
 ####################################
 
-def run(df: pd.DataFrame) -> dict:
+TOOL_DISPLAY_NAMES = {
+    "temporal_patterns":   "Analyzing timing patterns",
+    "anomaly_detection":   "Detecting unusual spending",
+    "subscription_hunter": "Finding subscriptions",
+    "correlation_engine":  "Finding spending links",
+    "spending_impact":     "Analyzing spending drivers",
+}
+
+
+def run(df: pd.DataFrame, on_progress=None) -> dict:
     """
     Single entry point: profile -> plan -> execute
 
-    Returns all results + metadata about what ran and what was skipped
+    Returns all results + metadata about what ran and what was skipped.
+    Optional on_progress callback receives {"step": "human-readable message"} dicts.
     """
 
+    def emit(step):
+        if on_progress:
+            on_progress({"step": step})
+
+    emit("Profiling your data...")
     profile = profile_data(df)
-    plan    = plan_analysis(profile)
-    results = execute_analysis_plan(df, plan)
+
+    emit("Planning analysis...")
+    plan = plan_analysis(profile)
+
+    results = execute_analysis_plan(df, plan, on_progress=on_progress)
 
     results["profile"] = profile
     results["plan"]    = plan

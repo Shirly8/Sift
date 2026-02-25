@@ -53,8 +53,11 @@ TOOLS:
 5. spending_what_if — Simulate cutting a category by a percentage and show impact
    params: {"category": "Dining", "cut_pct": 30}
 
+6. multi_analyze — For broad questions like "where can I cut back?", "how can I save money?", "what are my options?", "analyze my spending". Breaks down top spending categories by merchant and runs what-if scenarios. Use this when the question doesn't target a specific merchant, category, or time period.
+   params: {}
+
 Return JSON only: {"tool": "tool_name", "params": {...}}
-If none of these tools fit, return: {"tool": "general", "params": {}}"""
+If the question is broad or general, use multi_analyze."""
 
 
 
@@ -99,12 +102,18 @@ def ask(question: str, df: pd.DataFrame, analysis_results: dict = None) -> dict:
     elif tool_name == "spending_what_if":
         computation = _spending_what_if(df, params.get("category", ""), params.get("cut_pct", 0))
 
+    elif tool_name == "multi_analyze":
+        computation = _multi_analyze(df, analysis_results)
+
     else:
         computation = _general_summary(df, analysis_results)
 
 
     # ask Claude to explain the computation results in natural language
-    answer = _explain_results(question, computation, tool_name, summary)
+    if tool_name == "multi_analyze":
+        answer = _explain_multi_results(question, computation, summary)
+    else:
+        answer = _explain_results(question, computation, tool_name, summary)
 
     return {
         "answer":      answer,
@@ -209,7 +218,7 @@ def _breakdown_category(df: pd.DataFrame, category: str, month: str = None) -> d
     Optionally filter to a specific month.
     """
 
-    mask = df["category"].str.lower() == category.lower()
+    mask = df["category"].fillna("").str.lower() == category.lower()
 
     if month:
         dates = pd.to_datetime(df["date"])
@@ -238,7 +247,7 @@ def _breakdown_category(df: pd.DataFrame, category: str, month: str = None) -> d
     # compare to overall average if no month filter
     monthly_avg = None
     if month:
-        all_months = df[df["category"].str.lower() == category.lower()].copy()
+        all_months = df[df["category"].fillna("").str.lower() == category.lower()].copy()
         all_months["month"] = pd.to_datetime(all_months["date"]).dt.to_period("M")
         monthly_totals = all_months.groupby("month")["amount"].sum()
         monthly_avg = round(float(monthly_totals.mean()), 2)
@@ -283,7 +292,7 @@ def _compare_periods(df: pd.DataFrame, period_a: str, period_b: str, category: s
     mask_b = (periods >= start_b) & (periods <= end_b)
 
     if category:
-        cat_mask = df["category"].str.lower() == category.lower()
+        cat_mask = df["category"].fillna("").str.lower() == category.lower()
         mask_a = mask_a & cat_mask
         mask_b = mask_b & cat_mask
 
@@ -391,16 +400,20 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
     "What if I cut dining by 30%?" — recalculate with reduced spending.
     """
 
-    mask   = df["category"].str.lower() == category.lower()
+    mask   = df["category"].fillna("").str.lower() == category.lower()
     subset = df[mask]
 
     if subset.empty:
         return {"found": False, "category": category, "reason": "Category not found"}
 
 
-    current_total  = float(subset["amount"].sum())
-    dates          = pd.to_datetime(df["date"])
-    months_in_data = max(1, (dates.max() - dates.min()).days / 30)
+    current_total = float(subset["amount"].sum())
+
+    # use the category's actual active months, not the overall data span
+    # this avoids understating monthly avg when the category is seasonal
+    cat_dates      = pd.to_datetime(subset["date"])
+    active_months  = cat_dates.dt.to_period("M").nunique()
+    months_in_data = max(1, active_months)
 
     current_monthly = current_total / months_in_data
     reduced_monthly = current_monthly * (1 - cut_pct / 100)
@@ -408,7 +421,7 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
     annual_savings  = monthly_savings * 12
 
     # what % of total spending does this category represent?
-    total_spending  = float(df[~df["category"].str.lower().isin(["income", "transfer", ""])]["amount"].sum())
+    total_spending  = float(df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])]["amount"].sum())
     category_pct    = (current_total / total_spending) * 100 if total_spending > 0 else 0
 
     return {
@@ -430,7 +443,7 @@ def _general_summary(df: pd.DataFrame, analysis_results: dict = None) -> dict:
     """
 
     dates = pd.to_datetime(df["date"])
-    spend = df[~df["category"].str.lower().isin(["income", "transfer", ""])]
+    spend = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
 
     by_category = spend.groupby("category")["amount"].sum().sort_values(ascending=False)
     top_cats    = [{"category": cat, "total": round(float(v), 2)} for cat, v in by_category.head(5).items()]
@@ -446,7 +459,52 @@ def _general_summary(df: pd.DataFrame, analysis_results: dict = None) -> dict:
 
 
 ####################################
-# STEP 5: EXPLAIN RESULTS
+# STEP 5: MULTI-TOOL ANALYSIS
+####################################
+
+def _multi_analyze(df: pd.DataFrame, analysis_results: dict = None) -> dict:
+    """
+    Chain multiple tools for broad questions like "where can I cut back?"
+    Breaks down top discretionary categories by merchant + runs what-if on each.
+    """
+
+    spend  = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
+    by_cat = spend.groupby("category")["amount"].sum().sort_values(ascending=False)
+
+    discretionary = {"dining", "delivery", "shopping", "entertainment", "personal care"}
+
+    categories = []
+    for cat in by_cat.index:
+        if cat.lower() not in discretionary:
+            continue
+        if len(categories) >= 3:
+            break
+
+        breakdown = _breakdown_category(df, cat)
+        what_if   = _spending_what_if(df, cat, 20)
+
+        categories.append({
+            "category":  cat,
+            "breakdown": breakdown,
+            "what_if":   what_if,
+        })
+
+    result = {"categories": categories}
+
+    # include subscription data if available
+    if analysis_results:
+        subs = analysis_results.get("results", {}).get("subscription_hunter", {})
+        if subs.get("overlaps"):
+            result["subscription_overlaps"] = subs["overlaps"]
+        if subs.get("price_creep"):
+            result["price_creep"] = [pc for pc in subs["price_creep"] if pc.get("price_creep_detected")]
+
+    return result
+
+
+
+####################################
+# STEP 6: EXPLAIN RESULTS
 ####################################
 
 def _explain_results(question: str, computation: dict, tool_name: str, data_summary: str) -> str:
@@ -484,8 +542,41 @@ Respond in plain text (not JSON). Be conversational but data-driven."""
 
 
 
+def _explain_multi_results(question: str, computation: dict, data_summary: str) -> str:
+    """
+    Synthesize multi-tool results into a clear, actionable savings plan.
+    Richer output than single-tool explain — names specific merchants and amounts.
+    """
+
+    prompt = f"""You are a spending intelligence agent. A user asked a broad question about their finances.
+You analyzed their top spending categories, broke each down by merchant, and ran what-if scenarios on their real data.
+
+RULES:
+- Use EXACT numbers from the computation — do not make up numbers
+- Structure as a prioritized list of 3-5 specific actions
+- For each action, name the specific merchants and dollar amounts
+- End with the total potential annual savings across all actions
+- Use neutral framing — "One option would be..." not "You should..."
+- Be specific: "Reduce Uber Eats from $89/mo" not "reduce delivery spending"
+
+USER QUESTION: {question}
+
+MULTI-TOOL COMPUTATION RESULTS:
+{json.dumps(computation, indent=2, default=str)}
+
+Respond in plain text. Be direct, specific, and actionable."""
+
+    response = call_llm(prompt, temperature=0.3, max_tokens=600)
+
+    if not response:
+        return f"Here's what I found: {json.dumps(computation, indent=2, default=str)}"
+
+    return response
+
+
+
 ####################################
-# STEP 6: DATA SUMMARY FOR ROUTING
+# STEP 7: DATA SUMMARY FOR ROUTING
 ####################################
 
 def _build_data_summary(df: pd.DataFrame) -> str:

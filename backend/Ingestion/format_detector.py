@@ -44,9 +44,10 @@ TRANSACTION_TYPE_FILTERS = {
 # STEP 1: DETECT FORMAT TO FIND BANK
 ####################################
 
-def detect_csv_format(file_path: str) -> str:
+def detect_csv_format(csv_source) -> str:
+    """Accepts a file path (str) or file-like object (StringIO)."""
 
-    df      = pd.read_csv(file_path, nrows=5)
+    df      = pd.read_csv(csv_source, nrows=5)
     headers = [col.strip().lower() for col in df.columns]
 
     best_match = "generic" 

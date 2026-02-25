@@ -160,12 +160,18 @@ def detect_subscription_overlap(recurring: list) -> list:
     Multiple subscriptions in the same category = potential overlap
 
     Group recurring charges by category, flag categories with 2+
+    Skip essential categories where multiple subs are normal (utilities, insurance, etc.)
     """
+
+    # categories where having 2+ subscriptions is normal, not overlap
+    ESSENTIAL_CATEGORIES = {"Bills & Utilities", "Insurance", "Health", "Transport", "Rent & Housing", "Education"}
 
     # group by category
     by_category = {}
     for sub in recurring:
         cat = sub.get("category", "Unknown")
+        if cat in ESSENTIAL_CATEGORIES:
+            continue
         if cat not in by_category:
             by_category[cat] = []
         by_category[cat].append(sub)

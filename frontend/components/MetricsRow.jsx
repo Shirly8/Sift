@@ -1,123 +1,122 @@
 'use client';
 
-import { useState } from 'react';
 import AnimatedNumber from './AnimatedNumber';
 import Sparkline from './Sparkline';
 
 
-export default function MetricsRow({ profile = {} }) {
+export default function MetricsRow({ profile = {}, savingsPotential = 0 }) {
 
-  const [totalOpen, setTotalOpen] = useState(false);
-  const [avgOpen, setAvgOpen] = useState(false);
-
-  // extract from backend or use demo data
-  const totalSpent = profile.total_spent || 42360;
-  const monthlyTotals = profile.monthly_totals || [3200, 3450, 3620, 3780, 4100, 3890, 3950, 4250, 4480, 3700, 3940];
-  const monthsCount = profile.months_count || 11;
-  const monthlyAvg = profile.monthly_average || 3851;
-  const highestMonth = profile.highest_month || { amount: 4480, month: 'Sep' };
-  const lowestMonth = profile.lowest_month || { amount: 3200, month: 'Jan' };
-  const recentAvg = profile.recent_3mo_avg || 4040;
-  const trend = profile.spending_trend || 'Gradually rising';
-  const biggestSwing = profile.biggest_swing_category || { name: 'Dining Out', min: 380, max: 890 };
-  const couldSave = profile.annual_savings_potential || 2250;
+  const totalSpent = profile.total_spent || 0;
+  const monthlyTotals = profile.monthly_totals || [];
+  const monthsCount = profile.months_count || 0;
+  const monthlyAvg = profile.monthly_average || 0;
+  const biggestSwing = profile.biggest_swing_category || {};
+  const spendingTrend = profile.spending_trend || '';
+  const highestMonth = profile.highest_month || {};
+  const lowestMonth = profile.lowest_month || {};
+  const monthlyIncome = profile.monthly_income || 0;
+  const savingsRate = profile.savings_rate || 0;
 
 
   return (
     <div className="metrics-row-equal">
 
-
-      {/* TOTAL SPENT — hero card */}
-      <div className="card card--clickable" onClick={() => setTotalOpen(!totalOpen)}>
+      {/* TOTAL SPENT */}
+      <div className="card">
         <div className="card__accent" />
-
         <span className="label">Total Spent</span>
-
         <div className="flex items-baseline gap-1" style={{ marginTop: 6 }}>
           <span className="num-hero">$<AnimatedNumber value={totalSpent} /></span>
         </div>
-
-        <div className="flex items-center gap-2" style={{ marginTop: 8 }}>
-          <span className="text-sm ink-muted">over {monthsCount} months</span>
-        </div>
-
-        {/* expand detail */}
-        <div className={`metric-detail ${totalOpen ? 'open' : ''}`}>
-          <div style={{ paddingTop: 12, borderTop: '1px solid var(--surface-alt)' }}>
-            <div className="flex justify-between text-sm" style={{ padding: '3px 0' }}>
-              <span className="ink-soft">Highest month</span>
-              <span className="fw-600">${highestMonth.amount?.toLocaleString()} <span className="ink-muted fw-400">({highestMonth.month})</span></span>
-            </div>
-            <div className="flex justify-between text-sm" style={{ padding: '3px 0' }}>
-              <span className="ink-soft">Lowest month</span>
-              <span className="fw-600">${lowestMonth.amount?.toLocaleString()} <span className="ink-muted fw-400">({lowestMonth.month})</span></span>
-            </div>
-          </div>
-        </div>
+        {monthsCount > 0 && (
+          <div className="text-sm ink-muted" style={{ marginTop: 8 }}>over {monthsCount} months</div>
+        )}
       </div>
-
 
       {/* MONTHLY AVERAGE */}
-      <div className="card card--clickable" onClick={() => setAvgOpen(!avgOpen)}>
+      <div className="card">
         <span className="label">Monthly Average</span>
-
-        <div className="num-large" style={{ marginTop: 6 }}>
-          $<AnimatedNumber value={monthlyAvg} />
-        </div>
-
-        <div style={{ marginTop: 8 }}>
-          <Sparkline data={monthlyTotals} color="#CF5532" />
-        </div>
-
-        {/* expand detail */}
-        <div className={`metric-detail ${avgOpen ? 'open' : ''}`}>
-          <div style={{ paddingTop: 12, borderTop: '1px solid var(--surface-alt)' }}>
-            <div className="flex justify-between text-sm" style={{ padding: '3px 0' }}>
-              <span className="ink-soft">Recent 3 months</span>
-              <span className="fw-600">${recentAvg?.toLocaleString()}</span>
-            </div>
-            <div className="flex justify-between text-sm" style={{ padding: '3px 0' }}>
-              <span className="ink-soft">Trend</span>
-              <span className="fw-600 ink-terra">{trend}</span>
-            </div>
+        <div className="num-large" style={{ marginTop: 6 }}>$<AnimatedNumber value={monthlyAvg} /></div>
+        {monthlyTotals.length > 1 && (
+          <div style={{ marginTop: 8 }}><Sparkline data={monthlyTotals} color="#CF5532" /></div>
+        )}
+        {spendingTrend && spendingTrend !== 'Insufficient data' && (
+          <div className="flex items-center gap-1" style={{ marginTop: 6 }}>
+            <span style={{ fontSize: 12 }}>
+              {spendingTrend === 'Gradually rising' ? '\u2197' : spendingTrend === 'Gradually declining' ? '\u2198' : '\u2192'}
+            </span>
+            <span className="text-xs ink-soft">{spendingTrend}</span>
           </div>
-        </div>
+        )}
       </div>
-
 
       {/* BIGGEST SWING */}
-      <div className="card">
-        <div className="flex items-center gap-2">
-          <div className="dot dot--terra" />
-          <span className="label label--terra">Biggest Swing</span>
-          <span className="help-tip" data-tooltip="The category where your monthly spending changes the most">?</span>
+      {biggestSwing.name && (
+        <div className="card">
+          <div className="flex items-center gap-2">
+            <div className="dot dot--terra" />
+            <span className="label label--terra">Biggest Swing</span>
+            <span className="help-tip" data-tooltip="The category where your monthly spending changes the most">?</span>
+          </div>
+          <div className="fw-700 text-lg" style={{ marginTop: 8 }}>{biggestSwing.name}</div>
+          <div className="num-large" style={{ marginTop: 2 }}>${biggestSwing.min}&ndash;${biggestSwing.max}</div>
+          <div className="text-sm ink-muted" style={{ marginTop: 4 }}>per month range</div>
         </div>
+      )}
 
-        <div className="fw-700 text-lg" style={{ marginTop: 8 }}>{biggestSwing.name}</div>
-
-        <div className="flex items-baseline gap-2" style={{ marginTop: 2 }}>
-          <span className="num-large">${biggestSwing.min}–${biggestSwing.max}</span>
+      {/* COULD SAVE — computed from all detected opportunities */}
+      {savingsPotential > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2">
+            <div className="dot dot--sage" />
+            <span className="label label--sage">Could Save</span>
+          </div>
+          <div className="flex items-baseline gap-2" style={{ marginTop: 8 }}>
+            <span className="num-large ink-sage">$<AnimatedNumber value={savingsPotential} /></span>
+            <span className="text-sm ink-muted">/ year</span>
+          </div>
+          <div className="text-sm ink-muted" style={{ marginTop: 4 }}>across all opportunities</div>
         </div>
+      )}
 
-        <div className="text-sm ink-muted" style={{ marginTop: 4 }}>per month range</div>
-      </div>
-
-
-      {/* COULD SAVE */}
-      <div className="card">
-        <div className="flex items-center gap-2">
-          <div className="dot dot--sage" />
-          <span className="label label--sage">Could Save</span>
+      {/* SAVINGS RATE — only if income detected */}
+      {monthlyIncome > 0 && (
+        <div className="card">
+          <div className="flex items-center gap-2">
+            <div className="dot dot--sage" />
+            <span className="label label--sage">Savings Rate</span>
+          </div>
+          <div className="num-hero ink-sage" style={{ marginTop: 6 }}>{savingsRate}%</div>
+          <div className="text-sm ink-muted" style={{ marginTop: 8 }}>
+            ${Math.round(monthlyIncome).toLocaleString()}/mo income
+          </div>
+          <div className="text-sm ink-muted" style={{ marginTop: 2 }}>
+            ${Math.round(monthlyIncome - (profile.monthly_spending || monthlyAvg)).toLocaleString()}/mo saved
+          </div>
         </div>
+      )}
 
-        <div className="flex items-baseline gap-2" style={{ marginTop: 8 }}>
-          <span className="num-large ink-sage">$<AnimatedNumber value={couldSave} /></span>
-          <span className="text-sm ink-muted">/ year</span>
+      {/* HIGH / LOW MONTHS — show when no savings card */}
+      {savingsPotential === 0 && highestMonth.month && lowestMonth.month && (
+        <div className="card">
+          <span className="label">Spending Range</span>
+          <div style={{ marginTop: 8 }}>
+            <div className="flex justify-between items-baseline" style={{ marginBottom: 6 }}>
+              <span className="text-sm fw-600">{highestMonth.month}</span>
+              <span className="text-md fw-700" style={{ color: 'var(--terra)' }}>
+                ${highestMonth.amount?.toLocaleString()}
+              </span>
+            </div>
+            <div className="flex justify-between items-baseline">
+              <span className="text-sm fw-600">{lowestMonth.month}</span>
+              <span className="text-md fw-700" style={{ color: 'var(--sage)' }}>
+                ${lowestMonth.amount?.toLocaleString()}
+              </span>
+            </div>
+          </div>
+          <div className="text-xs ink-muted" style={{ marginTop: 6 }}>highest vs lowest month</div>
         </div>
-
-        <div className="text-sm ink-muted" style={{ marginTop: 4 }}>from subscriptions alone</div>
-      </div>
-
+      )}
 
     </div>
   );

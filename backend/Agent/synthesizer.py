@@ -14,11 +14,15 @@ E.g. payday spike + dining is top variance driver = post-payday dining is the sw
 import json
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-from LLM.client import extract_json
+from LLM.client import call_llm, extract_json
 
 
 # words that should NEVER appear in insights
 BANNED_WORDS = ["should", "bad", "problem", "waste", "too much", "excessive"]
+
+# categories the AI must never suggest cutting — the AI sees numbers, not context
+ESSENTIAL_CATEGORIES = {"groceries", "grocery", "rent", "mortgage", "healthcare",
+                        "medical", "insurance", "utilities", "childcare", "education"}
 
 
 
@@ -28,19 +32,14 @@ BANNED_WORDS = ["should", "bad", "problem", "waste", "too much", "excessive"]
 
 def synthesize_insights(tool_results: dict, profile: dict, llm_call=None) -> list:
     """
-    Two modes:
-      - With LLM: pass results to Claude for natural language synthesis
-      - Without LLM: build insights directly from tool outputs (works offline)
-
-    Both modes run cross-referencing after individual tool insights.
+    Synthesize tool outputs into ranked insights via LLM.
+    Routes to Claude (prod) or Ollama (local dev) — both go through call_llm.
+    Returns [] if LLM is unavailable.
     """
 
-    if llm_call:
-        insights = _synthesize_with_llm(tool_results, profile, llm_call)
-    else:
-        insights = _synthesize_local(tool_results, profile)
+    fn = llm_call or call_llm
+    insights = _synthesize_with_llm(tool_results, profile, fn)
 
-    # cross-reference: find connections BETWEEN tools that individual tools can't see
     cross_refs = _cross_reference(tool_results)
     insights.extend(cross_refs)
 
@@ -58,12 +57,15 @@ RULES:
 - Frame actions as options: "One option would be..." not "You should..."
 - Dollar impact must be calculated from the data, not estimated
 - If no dollar impact, set to 0 and confidence to "informational"
+- NEVER generate insights that simply restate a category's total spending (e.g. "High Shopping Spend", "High Dining Spend"). The spending bars already show totals — every insight MUST connect 2+ data points or reveal something the charts don't show.
+- Each insight must be distinct — no two insights about the same pattern or category
+- NEVER suggest reducing essentials: groceries, rent, mortgage, healthcare, medical, insurance, utilities, childcare, education. The AI sees numbers, not whether someone is food-insecure or depends on a service for their wellbeing. Only flag discretionary spending.
 
 RESULTS:
 {json.dumps(tool_results, indent=2, default=str)}
 
 DATA PROFILE:
-{json.dumps(profile, indent=2)}
+{json.dumps(profile, indent=2, default=str)}
 
 Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact": 0, "confidence": "HIGH", "action_option": "...", "tool_source": "..."}}]"""
 
@@ -77,146 +79,9 @@ Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact"
         return insights
 
     except Exception as e:
-        print(f"LLM synthesis failed ({e}) — falling back to local")
-        return _synthesize_local(tool_results, profile)
+        print(f"LLM synthesis failed ({e}) — returning empty insights")
+        return []
 
-
-
-def _synthesize_local(tool_results: dict, profile: dict) -> list:
-    """
-    Build insights directly from tool outputs — no LLM needed
-    """
-
-    insights = []
-
-
-    # subscription insights
-    subs = tool_results.get("subscription_hunter", {})
-
-    if subs.get("recurring"):
-        recurring     = subs["recurring"]
-        total_monthly = sum(r["amount"] for r in recurring)
-        total_annual  = sum(r["annual_cost"] for r in recurring)
-
-        insights.append({
-            "title":         f"{len(recurring)} active subscriptions at ${total_monthly:.2f}/month",
-            "description":   f"Your recurring charges total ${total_annual:.2f}/year across {len(recurring)} services.",
-            "dollar_impact": round(total_annual, 2),
-            "confidence":    "HIGH",
-            "action_option": "Review each subscription to confirm it's still providing value.",
-            "tool_source":   "subscription_hunter",
-        })
-
-    if subs.get("overlaps"):
-        for overlap in subs["overlaps"]:
-            insights.append({
-                "title":         f"{overlap['count']} overlapping {overlap['category']} subscriptions",
-                "description":   f"Combined cost: ${overlap['combined_annual']:.2f}/year.",
-                "dollar_impact": overlap["potential_savings"],
-                "confidence":    "HIGH",
-                "action_option": f"One option would be consolidating to fewer {overlap['category']} services.",
-                "tool_source":   "subscription_hunter",
-            })
-
-    # price creep
-    if subs.get("price_creep"):
-        for pc in subs["price_creep"]:
-            if pc.get("price_creep_detected"):
-                insights.append({
-                    "title":         f"{pc['merchant']} increased {pc['total_increase_pct']}%",
-                    "description":   f"From ${pc['original_price']} to ${pc['current_price']}.",
-                    "dollar_impact": pc["annual_cost_increase"],
-                    "confidence":    "HIGH",
-                    "action_option": f"One option would be reviewing whether {pc['merchant']} still fits your budget.",
-                    "tool_source":   "subscription_hunter",
-                })
-
-
-    # temporal insights
-    temporal = tool_results.get("temporal_patterns", {})
-
-    payday = temporal.get("payday", {})
-    if payday.get("payday_detected"):
-        pct = payday["spending_in_first_7_days_pct"]
-        insights.append({
-            "title":         f"{pct}% of spending within 7 days of payday",
-            "description":   f"This pattern held across {payday['cycles_analyzed']} payday cycles.",
-            "dollar_impact": 0,
-            "confidence":    "HIGH" if payday["confidence"] > 0.8 else "MEDIUM",
-            "action_option": "Consider whether this front-loading is intentional.",
-            "tool_source":   "temporal_patterns",
-        })
-
-    weekly = temporal.get("weekly", {})
-    if weekly.get("weekend_spending_multiple", 1.0) > 1.3:
-        mult = weekly["weekend_spending_multiple"]
-        insights.append({
-            "title":         f"Weekend spending is {mult}x weekday average",
-            "description":   f"Highest: {weekly['highest_spending_day']}, Lowest: {weekly['lowest_spending_day']}.",
-            "dollar_impact": 0,
-            "confidence":    "MEDIUM",
-            "action_option": None,
-            "tool_source":   "temporal_patterns",
-        })
-
-
-    # anomaly insights
-    anomalies = tool_results.get("anomaly_detection", {})
-
-    outliers = anomalies.get("outliers", [])
-    if outliers:
-        top = outliers[0]
-        insights.append({
-            "title":         f"Unusual transaction: {top['merchant']} — ${top['amount']}",
-            "description":   f"This is {top['z_score']}x the standard deviation for {top['category']} (avg ${top['category_avg']}).",
-            "dollar_impact": 0,
-            "confidence":    "HIGH",
-            "action_option": None,
-            "tool_source":   "anomaly_detection",
-        })
-
-    spikes = anomalies.get("spending_spikes", [])
-    for spike in spikes[:2]:
-        excess = round(spike["recent_month_total"] - spike["prior_avg"], 2)
-        insights.append({
-            "title":         f"{spike['category']} spiked {spike['spike_pct']:.0f}% last month",
-            "description":   f"${spike['recent_month_total']:.2f} vs ${spike['prior_avg']:.2f} average (${excess} above normal).",
-            "dollar_impact": excess,
-            "confidence":    "MEDIUM",
-            "action_option": None,
-            "tool_source":   "anomaly_detection",
-        })
-
-
-    # correlation insights
-    correlations = tool_results.get("correlation_engine", [])
-    if correlations:
-        for corr in correlations[:2]:
-            insights.append({
-                "title":         f"{corr['category_a']} ↔ {corr['category_b']} (r={corr['correlation']})",
-                "description":   corr["interpretation"],
-                "dollar_impact": 0,
-                "confidence":    corr["confidence"],
-                "action_option": None,
-                "tool_source":   "correlation_engine",
-            })
-
-
-    # impact attribution
-    impact = tool_results.get("spending_impact", {})
-    if impact.get("model_valid") and impact.get("impacts"):
-        top = impact["impacts"][0]
-        insights.append({
-            "title":         f"{top['category']} drives {top['impact_pct']}% of spending variance",
-            "description":   f"Based on {impact['n_months']} months of data.",
-            "dollar_impact": 0,
-            "confidence":    impact["confidence"],
-            "action_option": f"{top['category']} is your highest-leverage category for stabilizing monthly totals.",
-            "tool_source":   "spending_impact",
-        })
-
-
-    return insights
 
 
 
@@ -379,4 +244,105 @@ def validate_insight_framing(insight: dict) -> bool:
             print(f"Rejected insight — contains '{word}': {insight.get('title', '')}")
             return False
 
+    # reject insights that suggest cutting essentials
+    for cat in ESSENTIAL_CATEGORIES:
+        if f"reduce {cat}" in text or f"cut {cat}" in text or f"lower {cat}" in text:
+            print(f"Rejected insight — targets essential '{cat}': {insight.get('title', '')}")
+            return False
+
     return True
+
+
+
+####################################
+# SAVINGS PLAN
+####################################
+
+def generate_savings_plan(df, results: dict) -> dict:
+    """
+    Concrete savings opportunities from analysis + transaction data.
+    No LLM call — pure computation.
+    """
+
+    opportunities = []
+
+
+    # 1. subscription overlaps
+    subs = results.get("subscription_hunter", {})
+    if subs.get("overlaps"):
+        for overlap in subs["overlaps"]:
+            savings = overlap.get("potential_savings", 0)
+            if savings > 0:
+                opportunities.append({
+                    "title":          f"Consolidate {overlap['category']} subscriptions",
+                    "annual_savings": round(savings, 2),
+                    "detail":         f"{overlap['count']} overlapping services at ${overlap.get('combined_annual', 0):.0f}/yr combined",
+                    "type":           "subscription",
+                })
+
+
+    # 2. price creep
+    if subs.get("price_creep"):
+        for pc in subs["price_creep"]:
+            if pc.get("price_creep_detected") and pc.get("annual_cost_increase", 0) > 10:
+                opportunities.append({
+                    "title":          f"{pc['merchant']} price increase",
+                    "annual_savings": round(pc["annual_cost_increase"], 2),
+                    "detail":         f"Was ${pc.get('original_price', 0):.2f}/mo, now ${pc.get('current_price', 0):.2f}/mo",
+                    "type":           "price_creep",
+                })
+
+
+    # 3. top discretionary categories — with merchant breakdown
+    impact = results.get("spending_impact", {})
+    if impact.get("model_valid") and impact.get("impacts"):
+
+        # whitelist — only discretionary categories, never essentials
+        discretionary_cats = {"dining", "delivery", "shopping", "entertainment", "personal care"}
+
+        for imp in impact["impacts"]:
+            cat = imp["category"]
+            if cat.lower() not in discretionary_cats:
+                continue
+
+            avg = imp.get("monthly_avg", 0)
+            if avg < 30:
+                continue
+
+            # top merchants in this category
+            cat_txns = df[df["category"].fillna("").str.lower() == cat.lower()]
+            top_merchants = (
+                cat_txns.groupby("merchant")["amount"]
+                .sum()
+                .sort_values(ascending=False)
+                .head(3)
+                .index.tolist()
+            )
+
+            annual = round(avg * 0.20 * 12, 2)
+            if annual < 50:
+                continue
+
+            opportunities.append({
+                "title":           f"Reduce {cat} by 20%",
+                "annual_savings":  annual,
+                "detail":          f"Currently ${avg:.0f}/mo. Top: {', '.join(top_merchants)}",
+                "merchants":       top_merchants,
+                "current_monthly": round(avg, 2),
+                "type":            "discretionary",
+            })
+
+
+    # rank by impact, keep top 5
+    opportunities.sort(key=lambda x: x["annual_savings"], reverse=True)
+    opportunities = opportunities[:5]
+
+    total = sum(o["annual_savings"] for o in opportunities)
+
+    if not opportunities:
+        return None
+
+    return {
+        "total_annual_savings": round(total, 2),
+        "opportunities":        opportunities,
+    }

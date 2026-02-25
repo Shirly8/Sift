@@ -1,8 +1,9 @@
 """
 Find cross-category spending relationships using Pearson correlation
 
-Bonferroni correction prevents false positives from multiple comparisons.
-With 14 categories = 91 pairs, some will correlate by pure chance.
+Benjamini-Hochberg FDR controls false-discovery rate across multiple
+comparisons while remaining practical for typical consumer datasets
+(3-6 months, 10-14 categories).
 
   calculate_category_correlations(df)
   -> [{"category_a": "Groceries", "category_b": "Delivery", "correlation": -0.72, ...}]
@@ -11,6 +12,7 @@ With 14 categories = 91 pairs, some will correlate by pure chance.
 import pandas as pd
 import numpy as np
 from scipy import stats
+from statsmodels.stats.multitest import multipletests
 
 
 
@@ -20,9 +22,9 @@ from scipy import stats
 
 def calculate_category_correlations(df: pd.DataFrame) -> list:
     """
-    Monthly totals per category -> Pearson correlation matrix -> Bonferroni corrected
+    Monthly totals per category -> Pearson correlation matrix -> BH FDR corrected
 
-    Only report: |r| > 0.5 AND p < 0.05 / (# pairs)
+    Only report: |r| >= 0.4 AND FDR-adjusted p < 0.10
     """
 
     dates = pd.to_datetime(df["date"])
@@ -33,7 +35,7 @@ def calculate_category_correlations(df: pd.DataFrame) -> list:
         return []
 
     # skip non-spending
-    spend_df = df[~df["category"].str.lower().isin(["income", "transfer", ""])].copy()
+    spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
     spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
 
 
@@ -55,9 +57,8 @@ def calculate_category_correlations(df: pd.DataFrame) -> list:
 
 
     # compute all pairwise correlations
-    results   = []
+    pairs     = []
     n_pairs   = len(categories) * (len(categories) - 1) // 2
-    alpha     = 0.05
 
     for i in range(len(categories)):
         for j in range(i + 1, len(categories)):
@@ -68,34 +69,42 @@ def calculate_category_correlations(df: pd.DataFrame) -> list:
             a = pivot[cat_a].values.astype(float)
             b = pivot[cat_b].values.astype(float)
 
-            # skip if either is constant (no variance)
-            if np.std(a) == 0 or np.std(b) == 0:
+            # skip if either is constant or near-constant (no meaningful variance)
+            if np.std(a, ddof=1) < 1e-10 or np.std(b, ddof=1) < 1e-10:
                 continue
 
             r, p_value = stats.pearsonr(a, b)
+            pairs.append((cat_a, cat_b, r, p_value))
 
-            # Bonferroni: only significant if p < alpha / n_pairs
-            significant = p_value < (alpha / n_pairs)
+    if not pairs:
+        print(f"Found 0 significant correlations out of {n_pairs} pairs")
+        return []
 
-            # only report strong + significant
-            if abs(r) < 0.5 or not significant:
-                continue
+    # Benjamini-Hochberg FDR correction (less conservative than Bonferroni)
+    raw_pvals = [p for _, _, _, p in pairs]
+    reject, adjusted_pvals, _, _ = multipletests(raw_pvals, alpha=0.10, method="fdr_bh")
 
-            results.append({
-                "category_a":     cat_a,
-                "category_b":     cat_b,
-                "correlation":    round(float(r), 2),
-                "p_value":        round(float(p_value), 4),
-                "significant":    True,
-                "n_months":       n_months,
-                "interpretation": interpret_correlation(r, cat_a, cat_b),
-                "confidence":     "HIGH" if abs(r) > 0.7 else "MEDIUM",
-            })
+    # filter: |r| >= 0.4 AND FDR-adjusted p < 0.10
+    results = []
+    for idx, (cat_a, cat_b, r, p_raw) in enumerate(pairs):
+        if abs(r) < 0.4 or not reject[idx]:
+            continue
+
+        results.append({
+            "category_a":     cat_a,
+            "category_b":     cat_b,
+            "correlation":    round(float(r), 2),
+            "p_value":        round(float(adjusted_pvals[idx]), 4),
+            "significant":    True,
+            "n_months":       n_months,
+            "interpretation": interpret_correlation(r, cat_a, cat_b),
+            "confidence":     "HIGH" if abs(r) >= 0.7 else "MEDIUM",
+        })
 
     # sort by absolute correlation descending
     results.sort(key=lambda x: abs(x["correlation"]), reverse=True)
 
-    print(f"Found {len(results)} significant correlations out of {n_pairs} pairs")
+    print(f"Found {len(results)} significant correlations out of {n_pairs} pairs (BH FDR, |r|>=0.4)")
 
     return results
 

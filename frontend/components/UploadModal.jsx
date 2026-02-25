@@ -3,33 +3,18 @@
 import { useState, useRef, useEffect } from 'react';
 
 
-const STEPS = [
-  { key: 'detect',     label: 'Recognizing your bank format...' },
-  { key: 'normalize',  label: 'Cleaning up transactions...' },
-  { key: 'categorize', label: 'Sorting into categories...' },
-  { key: 'analyze',    label: 'Analyzing spending patterns...' },
-];
-
-
 export default function UploadModal({ open, onClose, onComplete }) {
 
   const [state, setState] = useState('drop');    // drop | processing | ready
-  const [progress, setProgress] = useState(0);
-  const [stepStates, setStepStates] = useState(STEPS.map(() => 'pending'));
   const [dragover, setDragover] = useState(false);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [sessionId, setSessionId] = useState(null);
-  const [analysisData, setAnalysisData] = useState(null);
   const fileInputRef = useRef(null);
 
 
   // reset when opened
   useEffect(() => {
-    if (open) {
-      setState('drop');
-      setProgress(0);
-      setStepStates(STEPS.map(() => 'pending'));
-    }
+    if (open) setState('drop');
   }, [open]);
 
 
@@ -50,9 +35,6 @@ export default function UploadModal({ open, onClose, onComplete }) {
 
     setState('processing');
 
-    // step 1: format detection
-    setStepStates(prev => prev.map((s, j) => j === 0 ? 'active' : s));
-
     try {
       const formData = new FormData();
       formData.append('file', file);
@@ -70,30 +52,8 @@ export default function UploadModal({ open, onClose, onComplete }) {
       const data = await response.json();
 
       if (data.session_id) setSessionId(data.session_id);
-      if (data.analysis)  setAnalysisData(data.analysis);
-
-      // simulate step progression for UX
-      const steps = [0, 1, 2, 3];
-      const stepDurations = [400, 600, 800, 400];
-
-      for (let i = 0; i < steps.length; i++) {
-        if (i > 0) setStepStates(prev => prev.map((s, j) => j === i - 1 ? 'done' : s));
-        setStepStates(prev => prev.map((s, j) => j === i ? 'active' : s));
-
-        const elapsed = stepDurations.slice(0, i).reduce((a, b) => a + b, 0);
-        const totalDur = stepDurations.reduce((a, b) => a + b, 0);
-        const newProgress = Math.min((elapsed + stepDurations[i]) / totalDur * 100, 100);
-
-        setProgress(newProgress);
-        await new Promise(r => setTimeout(r, stepDurations[i]));
-      }
-
-      setStepStates(prev => prev.map((s, j) => j === STEPS.length - 1 ? 'done' : s));
-      await new Promise(r => setTimeout(r, 300));
-      setState('ready');
-
-      // store upload summary for display
       setUploadSummary(data.summary);
+      setState('ready');
 
     } catch (err) {
       console.error('Upload error:', err);
@@ -157,30 +117,12 @@ export default function UploadModal({ open, onClose, onComplete }) {
         )}
 
 
-        {/* STATE 2 — processing */}
+        {/* STATE 2 — processing (sub-second, just a spinner) */}
         {state === 'processing' && (
-          <div>
+          <div style={{ textAlign: 'center', padding: '20px 0' }}>
+            <div className="spinner" style={{ width: 40, height: 40, borderWidth: '3px', margin: '0 auto 16px' }} />
             <h2 className="heading-section" style={{ marginBottom: 6 }}>Reading your transactions...</h2>
-            <p className="text-sm ink-muted">transactions.csv</p>
-
-            <div className="upload-progress">
-              <div className="upload-progress__fill" style={{ width: `${progress}%` }} />
-            </div>
-
-            <div className="upload-steps">
-              {STEPS.map((step, i) => (
-                <div key={step.key} className={`upload-step ${stepStates[i]}`}>
-                  <div className="upload-step__dot">
-                    {stepStates[i] === 'done' && (
-                      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="#2D7A2D" strokeWidth="3" strokeLinecap="round">
-                        <path d="M5 12l5 5L20 7" />
-                      </svg>
-                    )}
-                  </div>
-                  <span>{step.label}</span>
-                </div>
-              ))}
-            </div>
+            <p className="text-sm ink-muted">This should only take a moment</p>
           </div>
         )}
 
@@ -212,7 +154,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
             <button
               className="btn btn--primary"
               style={{ width: '100%', justifyContent: 'center' }}
-              onClick={() => onComplete && onComplete(sessionId, analysisData)}
+              onClick={() => onComplete && onComplete(sessionId, null)}
             >
               Analyze My Spending
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">

@@ -1,12 +1,10 @@
 """
 Routes:
   GET  /api/health-check      — liveness probe
-  GET  /api/settings           — LLM provider info
-  POST /api/upload             — upload CSV, run ingestion + categorization
+  POST /api/upload             — upload CSV, run ingestion + categorization (fast, no analysis)
   POST /api/analyze            — run full agent analysis on uploaded session
   POST /api/ask                — conversational follow-up (agent-style, not chatbot)
   POST /api/correct-category   — learn from user category correction
-  POST /api/categorize-llm     — LLM fallback for uncategorized merchants
 """
 
 import io
@@ -14,8 +12,11 @@ import os
 import sys
 import time
 import uuid
+import json
+import queue
+import threading
 import pandas as pd
-from flask import Flask, request, jsonify
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
@@ -29,9 +30,9 @@ from Ingestion.format_detector       import detect_csv_format, validate_csv_stru
 from Ingestion.normalizer            import clean_merchant_name, deduplicate_transactions, validate_date_range, calculate_data_quality_score
 from Categorization.rule_categorizer import build_rule_engine, batch_categorize
 from Categorization.merchant_db      import lookup_merchant, load_merchant_db, update_from_user_correction, _save_db, DB_PATH
-from Categorization.llm_categorizer  import batch_categorize_llm, validate_llm_confidence
+from Categorization.llm_categorizer  import batch_categorize_llm, CATEGORIES
 from Agent.orchestrator              import run as run_agent
-from Agent.synthesizer               import synthesize_insights
+from Agent.synthesizer               import synthesize_insights, generate_savings_plan
 from Agent.conversational            import ask as agent_ask
 from LLM.client                      import call_llm
 
@@ -52,9 +53,14 @@ limiter = Limiter(
     storage_uri="memory://",
 )
 
-_rules    = build_rule_engine()
-_sessions = {}                  # session_id -> {df, analysis_results, created_at}
-MAX_SESSIONS = 50
+# trust proxy headers (Railway, Heroku, etc.) so rate limiting works behind a reverse proxy
+app.config["RATELIMIT_HEADERS_ENABLED"] = True
+
+_rules          = build_rule_engine()
+_sessions       = {}            # session_id -> {df, analysis_results, created_at}
+_sessions_lock  = threading.Lock()
+MAX_SESSIONS    = 50
+SESSION_TTL     = 3600          # 1 hour — sessions expire after this
 
 
 ####################################
@@ -79,6 +85,48 @@ def serialize_for_json(obj):
         return obj
 
 
+####################################
+# HELPER: SESSION MANAGEMENT
+####################################
+
+def _evict_expired_sessions():
+    """Remove sessions older than SESSION_TTL. Call inside _sessions_lock."""
+    now = time.time()
+    expired = [sid for sid, s in _sessions.items() if now - s["created_at"] > SESSION_TTL]
+    for sid in expired:
+        del _sessions[sid]
+    if expired:
+        print(f"Evicted {len(expired)} expired sessions")
+
+
+def _get_session(session_id: str) -> dict:
+    """Thread-safe session lookup with TTL eviction."""
+    with _sessions_lock:
+        _evict_expired_sessions()
+        session = _sessions.get(session_id)
+        if session and time.time() - session["created_at"] > SESSION_TTL:
+            del _sessions[session_id]
+            return None
+        return session
+
+
+def _store_session(session_id: str, data: dict):
+    """Thread-safe session storage with capacity eviction."""
+    with _sessions_lock:
+        _evict_expired_sessions()
+        if len(_sessions) >= MAX_SESSIONS:
+            oldest = min(_sessions, key=lambda k: _sessions[k]["created_at"])
+            del _sessions[oldest]
+        _sessions[session_id] = data
+
+
+def _update_session(session_id: str, key: str, value):
+    """Thread-safe session field update."""
+    with _sessions_lock:
+        if session_id in _sessions:
+            _sessions[session_id][key] = value
+
+
 
 ####################################
 # ROUTES
@@ -89,23 +137,15 @@ def health_check():
     return jsonify({"status": "ok"})
 
 
-@app.route("/api/settings", methods=["GET"])
-def settings():
-    return jsonify({
-        "llm_provider": os.getenv("LLM_PROVIDER", "claude"),
-        "model":        os.getenv("CLAUDE_MODEL", "claude-sonnet-4-6"),
-    })
-
-
 @app.route("/api/upload", methods=["POST"])
 @limiter.limit("30 per day")
 def upload():
     """
     Accepts a CSV file, runs ingestion + rule categorization.
-    Returns session_id for subsequent /analyze calls.
+    Fast path — NO analysis here. Analysis runs in /api/analyze.
 
       POST (multipart file)
-      -> {"session_id": "...", "transactions": [...], "summary": {...}}
+      -> {"session_id": "...", "summary": {...}}
     """
 
     if "file" not in request.files:
@@ -179,28 +219,14 @@ def upload():
             _save_db(db, DB_PATH)
 
 
-        # run full analysis pipeline
-        analysis = None
-        try:
-            analysis = run_agent(df)
-            analysis["insights"] = synthesize_insights(
-                analysis["results"], analysis["profile"], call_llm,
-            )
-        except Exception as e:
-            print(f"Analysis failed during upload: {e}")
-
-        # store session for /api/ask — evict oldest if over limit
+        # store session — analysis runs separately in /api/analyze
         session_id = str(uuid.uuid4())
 
-        if len(_sessions) >= MAX_SESSIONS:
-            oldest = min(_sessions, key=lambda k: _sessions[k]["created_at"])
-            del _sessions[oldest]
-
-        _sessions[session_id] = {
+        _store_session(session_id, {
             "df":               df,
-            "analysis_results": analysis,
+            "analysis_results": None,
             "created_at":       time.time(),
-        }
+        })
 
         response_data = {
             "status":       "success",
@@ -218,7 +244,6 @@ def upload():
                     "days":  int((end - start).days),
                 },
             },
-            "analysis": analysis,
         }
         return jsonify(serialize_for_json(response_data))
 
@@ -245,12 +270,14 @@ def analyze():
         return jsonify({"error": "No JSON body provided"}), 400
 
 
-    # session lookup first, fall back to raw transactions
+    # thread-safe session lookup
     session_id = data.get("session_id")
-    if session_id and session_id in _sessions:
-        df = _sessions[session_id]["df"]
-    elif session_id and session_id not in _sessions:
-        return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
+    if session_id:
+        session = _get_session(session_id)
+        if session:
+            df = session["df"]
+        else:
+            return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
     elif "transactions" in data:
         df = pd.DataFrame(data["transactions"])
     else:
@@ -259,7 +286,7 @@ def analyze():
 
     try:
         # auto-categorize any uncategorized transactions before analysis
-        uncategorized_mask = df["category"].isna() | (df["category"] == "")
+        uncategorized_mask = df["category"].fillna("").eq("") | df["category"].isna()
         if uncategorized_mask.any():
             print(f"Auto-categorizing {uncategorized_mask.sum()} uncategorized transactions...")
 
@@ -274,11 +301,12 @@ def analyze():
                         df.loc[merchant_mask, "category"] = row["category"]
                         df.loc[merchant_mask, "confidence"] = row.get("confidence", 0.5)
 
-                    newly_categorized = (~uncategorized_mask) & (df["category"].notna() & (df["category"] != ""))
-                    print(f"  ✓ Categorized {newly_categorized.sum()} transactions via LLM")
+                    still_uncategorized = df["category"].fillna("").eq("") | df["category"].isna()
+                    newly_categorized = uncategorized_mask & ~still_uncategorized
+                    print(f"  Categorized {newly_categorized.sum()} transactions via LLM")
 
                 except Exception as e:
-                    print(f"  ⚠ LLM categorization failed: {e} — proceeding with available data")
+                    print(f"  LLM categorization failed: {e} — proceeding with available data")
 
         # orchestrator: profile -> plan -> execute tools
         results = run_agent(df)
@@ -288,14 +316,112 @@ def analyze():
             results["results"], results["profile"], call_llm,
         )
 
+        # savings plan: concrete opportunities from analysis + transaction data
+        results["savings_plan"] = generate_savings_plan(df, results["results"])
+
         # persist so /api/ask can access without re-running
-        if session_id and session_id in _sessions:
-            _sessions[session_id]["analysis_results"] = results
+        if session_id:
+            _update_session(session_id, "analysis_results", results)
 
         return jsonify(serialize_for_json(results))
 
     except Exception as e:
         return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+
+
+
+@app.route("/api/analyze-stream", methods=["GET"])
+@limiter.limit("20 per day")
+def analyze_stream():
+    """
+    SSE endpoint — streams real-time progress as each analysis tool runs.
+
+      GET /api/analyze-stream?session_id=...
+      -> text/event-stream with progress events, final event contains full results
+    """
+
+    session_id = request.args.get("session_id")
+    if not session_id:
+        return jsonify({"error": "session_id required"}), 400
+
+    session = _get_session(session_id)
+    if not session:
+        return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
+
+    df = session["df"].copy()
+
+    def generate():
+        q = queue.Queue()
+
+        def on_progress(event):
+            q.put(event)
+
+        result_holder = [None]
+        error_holder = [None]
+
+        def run_analysis():
+            try:
+                # LLM categorization (if needed)
+                uncategorized_mask = df["category"].fillna("").eq("") | df["category"].isna()
+                if uncategorized_mask.any():
+                    q.put({"step": "Categorizing merchants..."})
+
+                    uncategorized_merchants = df[uncategorized_mask]["merchant"].unique().tolist()
+                    if uncategorized_merchants:
+                        try:
+                            llm_results = batch_categorize_llm(uncategorized_merchants)
+                            for _, row in llm_results.iterrows():
+                                merchant_mask = df["merchant"] == row["merchant"]
+                                df.loc[merchant_mask, "category"] = row["category"]
+                                df.loc[merchant_mask, "confidence"] = row.get("confidence", 0.5)
+                        except Exception as e:
+                            print(f"  LLM categorization failed: {e}")
+
+                # orchestrator: profile -> plan -> execute tools (emits {"step": "..."} via callback)
+                results = run_agent(df, on_progress=on_progress)
+
+                # synthesizer: tool outputs -> ranked insights
+                q.put({"step": "Generating insights..."})
+                results["insights"] = synthesize_insights(
+                    results["results"], results["profile"], call_llm,
+                )
+
+                # savings plan: concrete opportunities from analysis + transaction data
+                results["savings_plan"] = generate_savings_plan(df, results["results"])
+
+                # persist so /api/ask can access without re-running
+                _update_session(session_id, "analysis_results", results)
+
+                result_holder[0] = results
+
+            except Exception as e:
+                error_holder[0] = e
+            finally:
+                q.put(None)  # sentinel
+
+        thread = threading.Thread(target=run_analysis)
+        thread.start()
+
+        while True:
+            event = q.get()
+            if event is None:
+                break
+            yield f"data: {json.dumps(serialize_for_json(event))}\n\n"
+
+        if error_holder[0]:
+            yield f"data: {json.dumps({'error': str(error_holder[0])})}\n\n"
+        else:
+            yield f"data: {json.dumps(serialize_for_json({'done': True, 'data': result_holder[0]}))}\n\n"
+
+    return Response(
+        generate(),
+        mimetype="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+            "Connection": "keep-alive",
+        },
+    )
 
 
 
@@ -319,12 +445,15 @@ def ask_question():
         return jsonify({"error": "No question provided"}), 400
 
 
-    # session lookup first, fall back to raw transactions
+    # thread-safe session lookup
     session_id = data.get("session_id")
-    if session_id and session_id in _sessions:
-        session = _sessions[session_id]
-        df               = session["df"]
-        analysis_results = session.get("analysis_results")
+    if session_id:
+        session = _get_session(session_id)
+        if session:
+            df               = session["df"]
+            analysis_results = session.get("analysis_results")
+        else:
+            return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
     elif "transactions" in data:
         df               = pd.DataFrame(data["transactions"])
         analysis_results = None
@@ -352,45 +481,22 @@ def correct_category():
 
     data = request.get_json()
 
-    merchant = data.get("merchant")
-    category = data.get("category")
+    merchant = (data.get("merchant") or "").strip()
+    category = (data.get("category") or "").strip()
 
     if not merchant or not category:
         return jsonify({"error": "merchant and category required"}), 400
 
+    # input validation: length limits and allowed categories
+    if len(merchant) > 100:
+        return jsonify({"error": "Merchant name too long (max 100 characters)"}), 400
+
+    if category not in CATEGORIES:
+        return jsonify({"error": f"Invalid category. Must be one of: {', '.join(CATEGORIES)}"}), 400
+
     update_from_user_correction(merchant, category)
 
     return jsonify({"status": "learned", "merchant": merchant, "category": category})
-
-
-
-@app.route("/api/categorize-llm", methods=["POST"])
-@limiter.limit("10 per day")
-def categorize_llm():
-    """
-    LLM fallback for merchants the rule engine couldn't classify.
-
-      POST {"merchants": ["AMZ*WHOLEFDS", "SP * ETSY"]}
-      -> {"results": [...], "needs_review": [...]}
-    """
-
-    data      = request.get_json()
-    merchants = data.get("merchants", [])
-
-    if not merchants:
-        return jsonify({"error": "No merchants provided"}), 400
-
-    # cap at 50 to control LLM cost
-    merchants = merchants[:50]
-
-    results      = batch_categorize_llm(merchants)
-    needs_review = validate_llm_confidence(results)
-
-    response_data = {
-        "results":      results.to_dict(orient="records"),
-        "needs_review": needs_review.to_dict(orient="records"),
-    }
-    return jsonify(serialize_for_json(response_data))
 
 
 

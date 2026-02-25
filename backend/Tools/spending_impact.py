@@ -34,7 +34,7 @@ def fit_impact_model(df: pd.DataFrame) -> dict:
 
 
     # skip income/transfer
-    spend_df = df[~df["category"].str.lower().isin(["income", "transfer", ""])].copy()
+    spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
     spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
 
     # monthly totals per category
@@ -54,21 +54,34 @@ def fit_impact_model(df: pd.DataFrame) -> dict:
         return {"model_valid": False, "reason": "Need 3+ spending categories"}
 
 
-    # std per category = how much each swings month-to-month
-    stds      = pivot[categories].std()
-    total_std = stds.sum()
+    # coefficient of variation (std/mean) per category — measures relative volatility
+    # a category with $500 avg and $50 std (CV=0.10) is more stable than
+    # one with $50 avg and $25 std (CV=0.50), even though the latter has lower raw std
+    means = pivot[categories].mean()
+    stds  = pivot[categories].std()
 
-    if total_std == 0:
+    cvs = {}
+    for cat in categories:
+        if means[cat] > 0:
+            cvs[cat] = stds[cat] / means[cat]
+        else:
+            cvs[cat] = 0.0
+
+    total_cv = sum(cvs.values())
+
+    if total_cv == 0:
         return {"model_valid": False, "reason": "No spending variance detected"}
 
     impacts = []
     for cat in categories:
-        pct = (stds[cat] / total_std) * 100
+        pct = (cvs[cat] / total_cv) * 100
 
         impacts.append({
             "category":    cat,
             "impact_pct":  round(float(pct), 1),
             "monthly_std": round(float(stds[cat]), 2),
+            "monthly_avg": round(float(means[cat]), 2),
+            "cv":          round(float(cvs[cat]), 3),
         })
 
     impacts.sort(key=lambda x: x["impact_pct"], reverse=True)

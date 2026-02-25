@@ -26,8 +26,7 @@ CATEGORIES = [
     "Income", "Transfer", "Uncategorized",
 ]
 
-CHUNK_SIZE           = 50
-CONFIDENCE_THRESHOLD = 0.7
+BATCH_SIZE = 10   # merchants per LLM call (keeps prompt focused)
 
 
 
@@ -61,21 +60,80 @@ Return JSON only, no explanation outside JSON:
 
 
 ####################################
-# STEP 2: BATCH CLASSIFY
+# STEP 2: BATCH CLASSIFY (multi-merchant per call)
 ####################################
+
+def _categorize_batch(merchants: list) -> list:
+    """Classify multiple merchants in a single LLM call."""
+
+    numbered = "\n".join(f"{i+1}. {m}" for i, m in enumerate(merchants))
+
+    prompt = f"""Categorize each merchant into exactly one of: {', '.join(CATEGORIES)}
+
+Merchants:
+{numbered}
+
+Return a JSON array with one object per merchant, in order:
+[{{"merchant": "...", "category": "...", "confidence": 0.0-1.0, "reasoning": "one sentence"}}]"""
+
+    try:
+        raw    = call_llm(prompt, temperature=0.0, max_tokens=150 * len(merchants))
+        parsed = json.loads(extract_json(raw))
+
+        if not isinstance(parsed, list):
+            parsed = [parsed]
+
+        # map results by merchant name for lookup
+        result_map = {}
+        for item in parsed:
+            m = item.get("merchant", "")
+            if item.get("category") not in CATEGORIES:
+                item["category"]   = "Uncategorized"
+                item["confidence"] = 0.0
+            result_map[m.upper()] = item
+
+        # ensure every input merchant has a result
+        results = []
+        for m in merchants:
+            if m.upper() in result_map:
+                r = result_map[m.upper()]
+                r["merchant"] = m
+                results.append(r)
+            else:
+                r = categorize_with_llm(m)
+                r["merchant"] = m
+                results.append(r)
+
+        return results
+
+    except (ConnectionError, TimeoutError, RuntimeError) as e:
+        # connection/auth errors — don't retry individually, it'll fail the same way
+        print(f"Batch LLM call failed (connection): {e} — marking all as Uncategorized")
+        return [
+            {"merchant": m, "category": "Uncategorized", "confidence": 0.0, "reasoning": f"LLM unavailable: {e}"}
+            for m in merchants
+        ]
+
+    except Exception:
+        # parsing/format errors — try individually (LLM might work with simpler prompts)
+        results = []
+        for m in merchants:
+            r = categorize_with_llm(m)
+            r["merchant"] = m
+            results.append(r)
+        return results
+
 
 def batch_categorize_llm(merchants: list) -> pd.DataFrame:
 
     results = []
-    chunks  = [merchants[i:i+CHUNK_SIZE] for i in range(0, len(merchants), CHUNK_SIZE)]
+    chunks  = [merchants[i:i+BATCH_SIZE] for i in range(0, len(merchants), BATCH_SIZE)]
 
     for chunk_idx, chunk in enumerate(chunks):
         print(f"LLM batch {chunk_idx+1}/{len(chunks)} ({len(chunk)} merchants)...")
 
-        for merchant in chunk:
-            result             = categorize_with_llm(merchant)
-            result["merchant"] = merchant
-            results.append(result)
+        batch_results = _categorize_batch(chunk)
+        results.extend(batch_results)
 
         if chunk_idx < len(chunks) - 1:
             time.sleep(0.3)
@@ -87,15 +145,3 @@ def batch_categorize_llm(merchants: list) -> pd.DataFrame:
 
 
 
-####################################
-# STEP 3: FLAG LOW CONFIDENCE
-####################################
-
-def validate_llm_confidence(df: pd.DataFrame, threshold: float = CONFIDENCE_THRESHOLD) -> pd.DataFrame:
-
-    needs_review = df[df["confidence"] < threshold].copy()
-
-    if len(needs_review) > 0:
-        print(f"{len(needs_review)} merchants need human review (confidence < {threshold})")
-
-    return needs_review

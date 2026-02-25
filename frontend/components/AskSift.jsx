@@ -12,11 +12,29 @@ const CHIPS = [
 ];
 
 
+// Fix #3: Safe text renderer — parses **bold** and newlines without dangerouslySetInnerHTML
+function SafeText({ text }) {
+  if (!text) return null;
+
+  // split on **bold** markers and double newlines
+  const parts = text.split(/(\*\*[^*]+\*\*|\n\n)/g);
+
+  return parts.map((part, i) => {
+    if (part.startsWith('**') && part.endsWith('**')) {
+      return <strong key={i}>{part.slice(2, -2)}</strong>;
+    }
+    if (part === '\n\n') return <br key={i} />;
+    return <span key={i}>{part}</span>;
+  });
+}
+
+
 export default function AskSift({ sessionId }) {
 
   const [input, setInput] = useState('');
   const [response, setResponse] = useState(null);
   const [typing, setTyping] = useState(false);
+  const [showCursor, setShowCursor] = useState(false);
   const [chipsVisible, setChipsVisible] = useState(true);
   const [toolLabel, setToolLabel] = useState('');
   const [toolDone, setToolDone] = useState(false);
@@ -31,6 +49,7 @@ export default function AskSift({ sessionId }) {
     setResponse(null);
     setToolDone(false);
     setTyping(true);
+    setShowCursor(false);
 
     try {
       // call backend /api/ask
@@ -58,27 +77,29 @@ export default function AskSift({ sessionId }) {
       setToolDone(true);
       await new Promise(r => setTimeout(r, 300));
 
-      // type out answer
+      // type out answer — plain text, no HTML
       const answerText = data.answer || 'No response generated.';
       const words = answerText.split(' ');
-      let html = '';
+      let built = '';
 
+      setShowCursor(true);
       for (let i = 0; i < words.length; i++) {
-        let w = words[i].replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
-        if (w === '\n\n') { html += '<br><br>'; }
-        else { html += (i > 0 ? ' ' : '') + w; }
+        if (words[i] === '\n\n') { built += '\n\n'; }
+        else { built += (i > 0 ? ' ' : '') + words[i]; }
 
-        setResponse(html + '<span class="typing-cursor"></span>');
+        setResponse(built);
         await new Promise(r => setTimeout(r, 20 + Math.random() * 15));
       }
 
-      setResponse(html);
+      setShowCursor(false);
+      setResponse(built);
 
     } catch (err) {
       console.error('Ask error:', err);
       setResponse(`Error: ${err.message}`);
       setToolLabel('error');
       setToolDone(true);
+      setShowCursor(false);
 
     } finally {
       setTyping(false);
@@ -142,9 +163,12 @@ export default function AskSift({ sessionId }) {
             </span>
           </div>
 
-          {/* text */}
+          {/* text — safe rendering, no dangerouslySetInnerHTML */}
           {response && (
-            <div className="text-sm ink-mid" style={{ lineHeight: 1.7 }} dangerouslySetInnerHTML={{ __html: response }} />
+            <div className="text-sm ink-mid" style={{ lineHeight: 1.7 }}>
+              <SafeText text={response} />
+              {showCursor && <span className="typing-cursor" />}
+            </div>
           )}
         </div>
       )}
