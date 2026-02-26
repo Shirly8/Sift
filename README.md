@@ -29,7 +29,7 @@ flowchart TD
         T1["Temporal (payday, weekly, seasonal - min 90d)"]
         T2["Anomaly (outliers, spikes, new - no min)"]
         T3["Subscriptions (recurring, price creep - min 100 txns)"]
-        T4["Correlations (Pearson+Bonferroni - min 90d, 3 cats)"]
+        T4["Correlations (Pearson+BH FDR - min 90d, 3 cats)"]
         T5["Spending Impact (std-dev ranking - min 180d, 5 cats)"]
     end
 

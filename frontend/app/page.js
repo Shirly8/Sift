@@ -9,11 +9,17 @@ export default function Home() {
 
   // intro -> dashboard flow
   const [showIntro, setShowIntro] = useState(true);
+  const [initialSession, setInitialSession] = useState(null);
+  const [initialAnalysis, setInitialAnalysis] = useState(null);
 
 
   if (showIntro) {
-    return <StartPage onUpload={() => setShowIntro(false)} />;
+    return <StartPage onUpload={(sid, analysis) => {
+      setInitialSession(sid);
+      setInitialAnalysis(analysis);
+      setShowIntro(false);
+    }} />;
   }
 
-  return <Dashboard initialShowUpload />;
+  return <Dashboard initialSessionId={initialSession} initialAnalysisData={initialAnalysis} />;
 }

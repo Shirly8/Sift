@@ -5,6 +5,7 @@
 
 # Any cache or data 
 backend/Data/merchant_cache.json
+backend/Data/test_small.csv
 
 # Python
 backend/venv/

@@ -13,9 +13,11 @@ User corrections are saved at 0.99 confidence and always override rule/LLM resul
 import os
 import json
 from datetime import datetime
+from filelock import FileLock
 
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
+_LOCK  = FileLock(DB_PATH + ".lock", timeout=5)
 
 
 
@@ -28,8 +30,9 @@ def load_merchant_db(file_path: str = DB_PATH) -> dict:
     if not os.path.exists(file_path):
         return {}
 
-    with open(file_path, "r") as f:
-        return json.load(f)
+    with _LOCK:
+        with open(file_path, "r") as f:
+            return json.load(f)
 
 
 
@@ -79,5 +82,6 @@ def update_from_user_correction(merchant: str, correct_category: str, db_path: s
 
 def _save_db(db: dict, db_path: str):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    with open(db_path, "w") as f:
-        json.dump(db, f, indent=2)
+    with _LOCK:
+        with open(db_path, "w") as f:
+            json.dump(db, f, indent=2)

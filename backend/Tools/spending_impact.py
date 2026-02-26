@@ -15,7 +15,6 @@ Replaced with direct std ranking which is what the regression was measuring anyw
 """
 
 import pandas as pd
-import numpy as np
 
 
 
@@ -54,34 +53,33 @@ def fit_impact_model(df: pd.DataFrame) -> dict:
         return {"model_valid": False, "reason": "Need 3+ spending categories"}
 
 
-    # coefficient of variation (std/mean) per category — measures relative volatility
-    # a category with $500 avg and $50 std (CV=0.10) is more stable than
-    # one with $50 avg and $25 std (CV=0.50), even though the latter has lower raw std
+    # dollar-weighted variance contribution per category
+    #
+    # pure CV (std/mean) overweights tiny categories — a $20/mo category with
+    # $15 std (CV=0.75) ranks above a $500/mo category with $200 std (CV=0.40),
+    # even though the latter causes 13x more dollar swing.
+    #
+    # we use monthly_std directly — this measures how many dollars each category
+    # swings month-to-month, which is what users actually care about.
     means = pivot[categories].mean()
     stds  = pivot[categories].std()
 
-    cvs = {}
-    for cat in categories:
-        if means[cat] > 0:
-            cvs[cat] = stds[cat] / means[cat]
-        else:
-            cvs[cat] = 0.0
+    total_std = stds.sum()
 
-    total_cv = sum(cvs.values())
-
-    if total_cv == 0:
+    if total_std == 0:
         return {"model_valid": False, "reason": "No spending variance detected"}
 
     impacts = []
     for cat in categories:
-        pct = (cvs[cat] / total_cv) * 100
+        pct = (stds[cat] / total_std) * 100
+        cv  = stds[cat] / means[cat] if means[cat] > 0 else 0.0
 
         impacts.append({
             "category":    cat,
             "impact_pct":  round(float(pct), 1),
             "monthly_std": round(float(stds[cat]), 2),
             "monthly_avg": round(float(means[cat]), 2),
-            "cv":          round(float(cvs[cat]), 3),
+            "cv":          round(float(cv), 3),
         })
 
     impacts.sort(key=lambda x: x["impact_pct"], reverse=True)
@@ -104,10 +102,5 @@ def fit_impact_model(df: pd.DataFrame) -> dict:
 ####################################
 
 def calculate_impact_confidence(n_months: int) -> str:
-
-    if n_months >= 9:
-        return "HIGH"
-    elif n_months >= 6:
-        return "MEDIUM"
-    else:
-        return "LOW"
+    """HIGH if 9+ months, MEDIUM if 6-8. Never called with <6 (fit_impact_model guards)."""
+    return "HIGH" if n_months >= 9 else "MEDIUM"

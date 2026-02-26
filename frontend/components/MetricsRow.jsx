@@ -59,7 +59,7 @@ export default function MetricsRow({ profile = {}, savingsPotential = 0 }) {
             <span className="help-tip" data-tooltip="The category where your monthly spending changes the most">?</span>
           </div>
           <div className="fw-700 text-lg" style={{ marginTop: 8 }}>{biggestSwing.name}</div>
-          <div className="num-large" style={{ marginTop: 2 }}>${biggestSwing.min}&ndash;${biggestSwing.max}</div>
+          <div className="num-large" style={{ marginTop: 2 }}>${Math.round(biggestSwing.min)}&ndash;${Math.round(biggestSwing.max)}</div>
           <div className="text-sm ink-muted" style={{ marginTop: 4 }}>per month range</div>
         </div>
       )}

@@ -28,7 +28,6 @@ ONLINE_PATTERN = re.compile(r"[*\s]+[A-Z0-9]*\d[A-Z0-9]{4,}$")
 
 ####################################
 # STEP 1: CLEAN MERCHANT NAME
-
 ####################################
 
 def clean_merchant_name(merchant: str) -> str:
@@ -46,7 +45,10 @@ def clean_merchant_name(merchant: str) -> str:
     m = re.sub(r"[\s\-,./]+$", "", m).strip()
 
     # fallback: return original if we stripped everything
-    return m if m else merchant.strip().upper()
+    if not m:
+        original = merchant.strip().upper()
+        return original if original else "UNKNOWN"
+    return m
 
 
 
@@ -55,11 +57,21 @@ def clean_merchant_name(merchant: str) -> str:
 ####################################
 
 def deduplicate_transactions(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Remove true duplicates (identical rows imported twice) while preserving
+    legitimate repeat transactions (e.g. two coffees at Starbucks in one day).
+
+    Strategy: allow up to 2 transactions with the same (date, amount, merchant).
+    Only the 3rd+ identical row is considered a data import duplicate.
+    """
 
     before = len(df)
 
-    # exact dupe: same date + amount + merchant
-    df = df.drop_duplicates(subset=["date", "amount", "merchant"], keep="first")
+    # count occurrences within each (date, amount, merchant) group
+    # keep the first 2 — two identical purchases in a day is plausible,
+    # three is almost certainly a CSV import artifact
+    df["_dup_rank"] = df.groupby(["date", "amount", "merchant"]).cumcount()
+    df = df[df["_dup_rank"] < 2].drop(columns=["_dup_rank"])
 
     removed = before - len(df)
     if removed > 0:

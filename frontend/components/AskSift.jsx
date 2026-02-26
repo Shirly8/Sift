@@ -38,6 +38,8 @@ export default function AskSift({ sessionId }) {
   const [chipsVisible, setChipsVisible] = useState(true);
   const [toolLabel, setToolLabel] = useState('');
   const [toolDone, setToolDone] = useState(false);
+  const [confidence, setConfidence] = useState(null);
+  const [methodology, setMethodology] = useState(null);
   const responseRef = useRef(null);
 
 
@@ -48,6 +50,8 @@ export default function AskSift({ sessionId }) {
     setChipsVisible(false);
     setResponse(null);
     setToolDone(false);
+    setConfidence(null);
+    setMethodology(null);
     setTyping(true);
     setShowCursor(false);
 
@@ -69,13 +73,9 @@ export default function AskSift({ sessionId }) {
 
       const data = await response.json();
 
-      // show tool being used
+      // show tool result immediately — no artificial delays
       setToolLabel(data.tool_used || 'analysis');
-
-      // simulate tool lookup delay
-      await new Promise(r => setTimeout(r, 600));
       setToolDone(true);
-      await new Promise(r => setTimeout(r, 300));
 
       // type out answer — plain text, no HTML
       const answerText = data.answer || 'No response generated.';
@@ -93,6 +93,8 @@ export default function AskSift({ sessionId }) {
 
       setShowCursor(false);
       setResponse(built);
+      setConfidence(data.confidence || null);
+      setMethodology(data.methodology || null);
 
     } catch (err) {
       console.error('Ask error:', err);
@@ -168,6 +170,26 @@ export default function AskSift({ sessionId }) {
             <div className="text-sm ink-mid" style={{ lineHeight: 1.7 }}>
               <SafeText text={response} />
               {showCursor && <span className="typing-cursor" />}
+            </div>
+          )}
+
+          {/* confidence + methodology metadata */}
+          {confidence && !typing && (
+            <div className="flex items-center gap-2 flex-wrap" style={{ marginTop: 10, opacity: 0.6 }}>
+              <span
+                className="text-xs fw-600"
+                style={{
+                  padding: '2px 8px',
+                  borderRadius: 4,
+                  background: confidence === 'HIGH' ? 'rgba(45,122,45,0.12)' : confidence === 'MEDIUM' ? 'rgba(200,150,0,0.12)' : 'rgba(200,60,60,0.12)',
+                  color: confidence === 'HIGH' ? '#2D7A2D' : confidence === 'MEDIUM' ? '#9A7B00' : '#C03C3C',
+                }}
+              >
+                {confidence} confidence
+              </span>
+              {methodology && (
+                <span className="text-xs ink-faint">{methodology}</span>
+              )}
             </div>
           )}
         </div>

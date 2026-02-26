@@ -67,7 +67,7 @@ export default function TrendChart({ categories, months }) {
             return (
               <g key={i}>
                 <line x1="0" y1={y} x2={W} y2={y} stroke="#EDECEA" strokeWidth="1" />
-                <text x="-4" y={y + 3} fill="#A0A0A0" fontSize="9" textAnchor="end" fontFamily="Plus Jakarta Sans">
+                <text x="-4" y={y + 3} fill="#A0A0A0" fontSize="11" textAnchor="end" fontFamily="Plus Jakarta Sans">
                   ${Math.round((i / 4) * maxVal)}
                 </text>
               </g>

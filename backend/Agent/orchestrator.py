@@ -10,9 +10,9 @@ This is what makes Sift agentic — it adapts to your data instead of running a 
   -> {"tools_run": ["anomaly_detection", ...], "tools_skipped": [("correlation_engine", "need 3+ months")], ...}
 """
 
-import json
 import time
 import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
@@ -22,7 +22,7 @@ from Tools.anomaly_detector       import detect_transaction_outliers, detect_spe
 from Tools.subscription_hunter    import detect_recurring_charges, detect_price_creep, detect_subscription_overlap
 from Tools.behavioral_correlation import calculate_category_correlations
 from Tools.spending_impact        import fit_impact_model
-from LLM.client                   import call_llm, extract_json
+from Tools.simulator             import stress_test as run_stress_test, calculate_runway
 
 
 # tool requirements — hard constraints
@@ -32,6 +32,7 @@ TOOL_REQUIREMENTS = {
     "subscription_hunter":    {"min_transactions": 100, "min_days": 0, "min_categories": 0},
     "correlation_engine":     {"min_days": 90,  "min_categories": 3},
     "spending_impact":        {"min_days": 180, "min_categories": 5},
+    "financial_resilience":   {"min_days": 90,  "min_categories": 3},
 }
 
 
@@ -79,18 +80,17 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     # recent 3-month average
     recent_3mo = monthly.tail(3).mean() if len(monthly) >= 3 else monthly_avg
 
-    # category breakdown for biggest swing
-    if "category" in df_spend.columns:
-        cat_spend = df_spend.groupby("category")["amount"].agg(['min', 'max', 'mean'])
-        cat_spend['swing'] = cat_spend['max'] - cat_spend['min']
-        cat_spend = cat_spend.sort_values('swing', ascending=False)
-
-        if len(cat_spend) > 0:
-            biggest = cat_spend.iloc[0]
+    # category with highest month-to-month dollar range
+    # uses monthly totals (not per-transaction) — consistent with spending_impact approach
+    if "category" in df_spend.columns and months_count >= 3:
+        cat_monthly = df_spend.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
+        if len(cat_monthly.columns) > 0:
+            cat_range = cat_monthly.max() - cat_monthly.min()
+            top_cat   = cat_range.idxmax()
             biggest_swing_category = {
-                "name": cat_spend.index[0],
-                "min": float(biggest['min']),
-                "max": float(biggest['max']),
+                "name": top_cat,
+                "min":  float(cat_monthly[top_cat].min()),
+                "max":  float(cat_monthly[top_cat].max()),
             }
         else:
             biggest_swing_category = {"name": "N/A", "min": 0, "max": 0}
@@ -139,7 +139,6 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
         "recent_3mo_avg": float(recent_3mo) if len(monthly) >= 3 else monthly_avg,
         "spending_trend": spending_trend,
         "biggest_swing_category": biggest_swing_category,
-        "annual_savings_potential": 0,
         "monthly_income": round(monthly_income, 2),
         "monthly_spending": round(monthly_spending, 2),
         "savings_rate": savings_rate,
@@ -185,74 +184,6 @@ def profile_data(df: pd.DataFrame) -> dict:
 # STEP 2: PLAN ANALYSIS
 ####################################
 
-TOOL_DESCRIPTIONS = {
-    "temporal_patterns":   "Detects payday spending cycles, weekly patterns, and seasonal trends",
-    "anomaly_detection":   "Finds outlier transactions and sudden spending spikes by category",
-    "subscription_hunter": "Identifies recurring charges, price creep, and overlapping subscriptions",
-    "correlation_engine":  "Finds which spending categories move together or inversely over time",
-    "spending_impact":     "Determines which categories drive the most month-to-month variance",
-}
-
-
-def _llm_prioritize_tools(profile: dict, enabled_tools: list) -> dict:
-    """
-    Let the LLM reason about which enabled tools are most likely to surface
-    insights given this specific data profile. LLM cannot override hard
-    guardrails — it only orders and annotates tools that already passed them.
-
-    Returns: {tool_name: {"priority": int, "reasoning": str}}
-    """
-
-    tool_list = "\n".join(
-        f"- {t['name']}: {TOOL_DESCRIPTIONS.get(t['name'], '')}"
-        for t in enabled_tools
-    )
-
-    profile_summary = (
-        f"Transactions: {profile['transaction_count']}\n"
-        f"Date range: {profile['date_range_days']} days "
-        f"({profile['start_date']} to {profile['end_date']})\n"
-        f"Categories: {', '.join(profile.get('categories', []))}\n"
-        f"Has income data: {profile.get('has_income', False)}\n"
-        f"Monthly average spend: ${profile.get('monthly_average', 0):.0f}\n"
-        f"Spending trend: {profile.get('spending_trend', 'unknown')}\n"
-        f"Highest swing category: {profile.get('biggest_swing_category', {}).get('name', 'unknown')}"
-    )
-
-    prompt = f"""You are analyzing a user's financial transaction data profile to decide which analysis tools will surface the most meaningful insights.
-
-AVAILABLE TOOLS (all have confirmed sufficient data):
-{tool_list}
-
-DATA PROFILE:
-{profile_summary}
-
-TASK:
-Order these tools by expected insight value for this specific dataset. Consider:
-- High transaction counts + many merchants → subscription_hunter likely productive
-- High variance in monthly totals → spending_impact and correlation_engine worth running
-- Income data present → temporal_patterns (payday detection) is meaningful
-- Short date ranges → deprioritize tools that need long histories
-
-Return JSON only — a list ordered by priority (1 = run first):
-[{{"name": "tool_name", "priority": 1, "reasoning": "one sentence"}}]"""
-
-    try:
-        raw    = call_llm(prompt, temperature=0.0, max_tokens=300)
-        parsed = json.loads(extract_json(raw))
-
-        # build lookup: tool_name -> {priority, reasoning}
-        return {
-            item["name"]: {"priority": item["priority"], "reasoning": item.get("reasoning", "")}
-            for item in parsed
-            if isinstance(item, dict) and "name" in item
-        }
-
-    except Exception as e:
-        print(f"LLM planning failed ({e}) — using default order")
-        return {}
-
-
 def plan_analysis(profile: dict) -> dict:
 
     tools = []
@@ -287,21 +218,16 @@ def plan_analysis(profile: dict) -> dict:
             "reason":  reason,
         })
 
-    # LLM reasoning: order and annotate enabled tools based on data profile
-    enabled_tools = [t for t in tools if t["enabled"]]
-    if enabled_tools:
-        llm_plan = _llm_prioritize_tools(profile, enabled_tools)
-
-        for t in tools:
-            if t["enabled"] and t["name"] in llm_plan:
-                t["priority"]  = llm_plan[t["name"]]["priority"]
-                t["reasoning"] = llm_plan[t["name"]]["reasoning"]
-            elif t["enabled"]:
-                t["priority"]  = 99
-                t["reasoning"] = ""
-
-        # sort enabled tools by LLM priority, keep skipped at the end
-        tools.sort(key=lambda t: (not t["enabled"], t.get("priority", 99)))
+    # deterministic priority — tools run in parallel so order only affects display
+    PRIORITY = {
+        "anomaly_detection": 1, "subscription_hunter": 2,
+        "temporal_patterns": 3, "spending_impact": 4, "correlation_engine": 5,
+        "financial_resilience": 6,
+    }
+    for t in tools:
+        if t["enabled"]:
+            t["priority"] = PRIORITY.get(t["name"], 99)
+    tools.sort(key=lambda t: (not t["enabled"], t.get("priority", 99)))
 
     enabled_count = sum(1 for t in tools if t["enabled"])
     skipped_count = sum(1 for t in tools if not t["enabled"])
@@ -320,6 +246,46 @@ def plan_analysis(profile: dict) -> dict:
 # STEP 3: EXECUTE PLAN
 ####################################
 
+def _run_tool(name: str, df: pd.DataFrame) -> tuple:
+    """Execute a single analysis tool. Returns (name, result)."""
+
+    if name == "temporal_patterns":
+        return name, {
+            "payday":   detect_payday_pattern(df),
+            "weekly":   detect_weekly_pattern(df),
+            "seasonal": detect_seasonal_pattern(df),
+        }
+
+    elif name == "anomaly_detection":
+        return name, {
+            "outliers":        detect_transaction_outliers(df),
+            "spending_spikes": detect_spending_spikes(df),
+            "new_merchants":   detect_new_merchants(df),
+        }
+
+    elif name == "subscription_hunter":
+        recurring = detect_recurring_charges(df)
+        return name, {
+            "recurring":   recurring,
+            "price_creep": [detect_price_creep(df, r["merchant"]) for r in recurring],
+            "overlaps":    detect_subscription_overlap(recurring),
+        }
+
+    elif name == "correlation_engine":
+        return name, calculate_category_correlations(df)
+
+    elif name == "spending_impact":
+        return name, fit_impact_model(df)
+
+    elif name == "financial_resilience":
+        return name, {
+            "stress_test": run_stress_test(df, "job_loss"),
+            "runway":      calculate_runway(df),
+        }
+
+    return name, {}
+
+
 def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dict:
 
     def emit(step):
@@ -334,55 +300,37 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dic
     tools_skipped = []
     start_time    = time.time()
 
-
+    # separate enabled vs skipped
+    enabled_tools = []
     for tool in plan["tools"]:
-
         name = tool["name"]
-
         if not tool["enabled"]:
             tools_skipped.append({"name": name, "reason": tool["reason"]})
-            continue
+        else:
+            enabled_tools.append(name)
 
-        label = TOOL_DISPLAY_NAMES.get(name, name)
-        emit(label + "...")
-        print(f"\nRunning: {name}...")
+    emit("Running analysis tools...")
 
-        try:
-            if name == "temporal_patterns":
-                results[name] = {
-                    "payday":   detect_payday_pattern(df),
-                    "weekly":   detect_weekly_pattern(df),
-                    "seasonal": detect_seasonal_pattern(df),
-                }
+    # run all enabled tools in parallel — they're independent (read-only on df)
+    with ThreadPoolExecutor(max_workers=len(enabled_tools) or 1) as executor:
+        futures = {}
+        for name in enabled_tools:
+            label = TOOL_DISPLAY_NAMES.get(name, name)
+            emit(label + "...")
+            print(f"\nRunning: {name}...")
+            futures[executor.submit(_run_tool, name, df)] = name
 
-            elif name == "anomaly_detection":
-                results[name] = {
-                    "outliers":       detect_transaction_outliers(df),
-                    "spending_spikes": detect_spending_spikes(df),
-                    "new_merchants":  detect_new_merchants(df),
-                }
-
-            elif name == "subscription_hunter":
-                recurring = detect_recurring_charges(df)
-                results[name] = {
-                    "recurring":  recurring,
-                    "price_creep": [detect_price_creep(df, r["merchant"]) for r in recurring],
-                    "overlaps":   detect_subscription_overlap(recurring),
-                }
-
-            elif name == "correlation_engine":
-                results[name] = calculate_category_correlations(df)
-
-            elif name == "spending_impact":
-                results[name] = fit_impact_model(df)
-
-            tools_run.append(name)
-            print(f"  Done: {name}")
-
-        except Exception as e:
-            print(f"  Error in {name}: {e}")
-            results[name] = {"error": str(e)}
-            tools_run.append(name)
+        for future in as_completed(futures):
+            name = futures[future]
+            try:
+                _, result = future.result()
+                results[name] = result
+                tools_run.append(name)
+                print(f"  Done: {name}")
+            except Exception as e:
+                print(f"  Error in {name}: {e}")
+                results[name] = {"error": str(e)}
+                tools_run.append(name)
 
 
     elapsed = round(time.time() - start_time, 2)
@@ -403,11 +351,12 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dic
 ####################################
 
 TOOL_DISPLAY_NAMES = {
-    "temporal_patterns":   "Analyzing timing patterns",
-    "anomaly_detection":   "Detecting unusual spending",
-    "subscription_hunter": "Finding subscriptions",
-    "correlation_engine":  "Finding spending links",
-    "spending_impact":     "Analyzing spending drivers",
+    "temporal_patterns":    "Analyzing timing patterns",
+    "anomaly_detection":    "Detecting unusual spending",
+    "subscription_hunter":  "Finding subscriptions",
+    "correlation_engine":   "Finding spending links",
+    "spending_impact":      "Analyzing spending drivers",
+    "financial_resilience": "Assessing financial resilience",
 }
 
 

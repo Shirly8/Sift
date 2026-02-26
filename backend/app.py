@@ -57,10 +57,15 @@ limiter = Limiter(
 app.config["RATELIMIT_HEADERS_ENABLED"] = True
 
 _rules          = build_rule_engine()
-_sessions       = {}            # session_id -> {df, analysis_results, created_at}
-_sessions_lock  = threading.Lock()
-MAX_SESSIONS    = 50
-SESSION_TTL     = 3600          # 1 hour — sessions expire after this
+_merchant_db    = load_merchant_db()       # loaded once at startup, kept in memory
+_sessions        = {}            # session_id -> {df, analysis_results, created_at}
+_sessions_lock   = threading.Lock()
+_merchant_lock   = threading.Lock()
+_analyzing       = set()        # session_ids currently running analysis — prevents concurrent runs
+_analyzing_lock  = threading.Lock()
+MAX_SESSIONS     = 50
+SESSION_TTL      = 3600         # 1 hour — sessions expire after this
+MAX_QUESTION_LEN = 500          # max chars for /api/ask questions
 
 
 ####################################
@@ -187,36 +192,36 @@ def upload():
         df["category"]   = result["category"].values
         df["confidence"] = result["confidence"].values
 
-        # check merchant cache for uncategorized — load once, not per row
-        db = load_merchant_db()
-
-        for i, row in df[df["category"].isna()].iterrows():
-            cat, conf, _ = lookup_merchant(row["merchant"], db=db)
-            if cat:
-                df.at[i, "category"]   = cat
-                df.at[i, "confidence"] = conf
+        # check in-memory merchant cache for uncategorized
+        with _merchant_lock:
+            for i, row in df[df["category"].isna()].iterrows():
+                cat, conf, _ = lookup_merchant(row["merchant"], db=_merchant_db)
+                if cat:
+                    df.at[i, "category"]   = cat
+                    df.at[i, "confidence"] = conf
 
         # split: categorized vs needs LLM
         needs_llm   = df[df["category"].isna() | (df["confidence"] < 0.7)]["merchant"].unique().tolist()
         categorized = int(df["category"].notna().sum())
 
 
-        # batch cache save — reuse the db we already loaded
+        # update in-memory cache + persist to disk
         changed = False
 
-        for _, row in df[df["confidence"] >= 0.8].iterrows():
-            key = row["merchant"].upper()
-            if key not in db or not db.get(key, {}).get("user_verified"):
-                db[key] = {
-                    "category":      row["category"],
-                    "confidence":    float(row["confidence"]),
-                    "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
-                    "user_verified": False,
-                }
-                changed = True
+        with _merchant_lock:
+            for _, row in df[df["confidence"] >= 0.8].iterrows():
+                key = row["merchant"].upper()
+                if key not in _merchant_db or not _merchant_db.get(key, {}).get("user_verified"):
+                    _merchant_db[key] = {
+                        "category":      row["category"],
+                        "confidence":    float(row["confidence"]),
+                        "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                        "user_verified": False,
+                    }
+                    changed = True
 
         if changed:
-            _save_db(db, DB_PATH)
+            _save_db(_merchant_db, DB_PATH)
 
 
         # store session — analysis runs separately in /api/analyze
@@ -273,10 +278,19 @@ def analyze():
     # thread-safe session lookup
     session_id = data.get("session_id")
     if session_id:
+        # prevent concurrent analysis on the same session
+        with _analyzing_lock:
+            if session_id in _analyzing:
+                return jsonify({"error": "Analysis already in progress for this session"}), 409
+            _analyzing.add(session_id)
+
         session = _get_session(session_id)
         if session:
-            df = session["df"]
+            # copy to avoid mutating the session's DataFrame during analysis
+            df = session["df"].copy()
         else:
+            with _analyzing_lock:
+                _analyzing.discard(session_id)
             return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
     elif "transactions" in data:
         df = pd.DataFrame(data["transactions"])
@@ -327,6 +341,11 @@ def analyze():
 
     except Exception as e:
         return jsonify({"error": f"Analysis failed: {str(e)}"}), 500
+
+    finally:
+        if session_id:
+            with _analyzing_lock:
+                _analyzing.discard(session_id)
 
 
 
@@ -444,13 +463,16 @@ def ask_question():
     if not question:
         return jsonify({"error": "No question provided"}), 400
 
+    if len(question) > MAX_QUESTION_LEN:
+        return jsonify({"error": f"Question too long (max {MAX_QUESTION_LEN} characters)"}), 400
+
 
     # thread-safe session lookup
     session_id = data.get("session_id")
     if session_id:
         session = _get_session(session_id)
         if session:
-            df               = session["df"]
+            df               = session["df"].copy()
             analysis_results = session.get("analysis_results")
         else:
             return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
@@ -495,6 +517,15 @@ def correct_category():
         return jsonify({"error": f"Invalid category. Must be one of: {', '.join(CATEGORIES)}"}), 400
 
     update_from_user_correction(merchant, category)
+
+    # also update in-memory cache so subsequent requests see the correction immediately
+    with _merchant_lock:
+        _merchant_db[merchant.upper()] = {
+            "category":      category,
+            "confidence":    0.99,
+            "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
+            "user_verified": True,
+        }
 
     return jsonify({"status": "learned", "merchant": merchant, "category": category})
 

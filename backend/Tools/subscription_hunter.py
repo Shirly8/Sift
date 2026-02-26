@@ -24,6 +24,15 @@ def detect_recurring_charges(df: pd.DataFrame) -> list:
     Requires min 2 cycles to detect, 3+ for HIGH confidence
     """
 
+    # categories where recurring charges are genuine subscriptions/bills
+    # vs categories where regular purchases are just habits (e.g. weekly coffee)
+    SUBSCRIPTION_CATEGORIES = {
+        "subscriptions", "bills & utilities", "insurance", "rent & housing",
+        "education", "health",
+    }
+    # categories where regular purchases are habits, not subscriptions
+    HABIT_CATEGORIES = {"dining", "groceries", "delivery", "shopping", "transport"}
+
     results = []
     dates   = pd.to_datetime(df["date"])
 
@@ -35,13 +44,15 @@ def detect_recurring_charges(df: pd.DataFrame) -> list:
         group_dates   = pd.to_datetime(group["date"]).sort_values()
         group_amounts = group["amount"].astype(float)
 
-        # check if amounts are consistent (std < 20% of mean)
+        # check if amounts are consistent (std < 35% of mean)
+        # relaxed from 20% to catch tiered/usage-based subscriptions
+        # (e.g. phone bills that vary $40-55, cloud services with usage tiers)
         mean_amount = group_amounts.mean()
         if mean_amount < 3:
             continue
 
         amount_std = group_amounts.std()
-        if mean_amount > 0 and (amount_std / mean_amount) > 0.20:
+        if mean_amount > 0 and (amount_std / mean_amount) > 0.35:
             continue
 
         # check interval regularity
@@ -59,19 +70,36 @@ def detect_recurring_charges(df: pd.DataFrame) -> list:
         else:
             continue
 
+        cat = group["category"].iloc[0] if "category" in group.columns else "Subscriptions"
+
+        # filter out habitual purchases masquerading as subscriptions
+        # someone buying Starbucks every ~30 days is a habit, not a subscription.
+        # true subscriptions have near-identical amounts (CV < 0.10) or are in
+        # subscription-like categories (bills, utilities, etc.)
+        cat_lower  = cat.lower() if cat else ""
+        amount_cv  = (amount_std / mean_amount) if mean_amount > 0 else 0
+
+        if cat_lower in HABIT_CATEGORIES and amount_cv > 0.10:
+            # habit purchase: regular timing but inconsistent amounts
+            # (e.g. Starbucks $4.50, $5.25, $6.10 — not a subscription)
+            continue
+
         # day of month (most common)
         day_of_month = int(group_dates.dt.day.mode().iloc[0])
 
-        # confidence based on number of cycles
+        # confidence based on number of cycles and amount consistency
         n_cycles = len(group)
-        if n_cycles >= 3:
-            confidence = 0.95
+
+        if n_cycles >= 3 and amount_cv <= 0.05:
+            confidence = 0.95     # exact same amount = almost certainly a subscription
+        elif n_cycles >= 3 and amount_cv <= 0.10:
+            confidence = 0.90
+        elif n_cycles >= 3:
+            confidence = 0.80     # high-variance recurring (e.g. phone bills)
         else:
             confidence = 0.70
 
         annual_cost = float(mean_amount) * (12 if frequency == "monthly" else 26 if frequency == "biweekly" else 1)
-
-        cat = group["category"].iloc[0] if "category" in group.columns else "Subscriptions"
 
         results.append({
             "merchant":     merchant,

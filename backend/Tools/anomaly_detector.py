@@ -2,10 +2,10 @@
 Find transaction outliers, category spending spikes, and new merchants
 
   detect_transaction_outliers(df)
-  -> [{"merchant": "Best Buy", "amount": 1247, "z_score": 23.1, ...}]
+  -> [{"merchant": "Best Buy", "amount": 1247, "iqr_score": 3.1, "category_median": 45.00, ...}]
 
   detect_spending_spikes(df)
-  -> [{"category": "Dining", "recent_month_total": 890, "six_month_avg": 420, "spike_pct": 112}]
+  -> [{"category": "Dining", "recent_month_total": 890, "prior_avg": 420, "spike_pct": 112}]
 """
 
 import pandas as pd
@@ -19,9 +19,14 @@ import numpy as np
 
 def detect_transaction_outliers(df: pd.DataFrame) -> list:
     """
-    Flag transactions > 3 sigma from their category mean
+    Flag unusually large transactions using IQR (interquartile range).
 
-    3 sigma = 99.7% confidence — only truly unusual purchases
+    IQR is robust to skewed distributions — transaction amounts are typically
+    right-skewed (many small purchases, few large ones), so z-scores on raw
+    amounts miss real outliers while flagging legitimate purchases.
+
+    Outlier threshold: amount > Q3 + 2.0 * IQR (stricter than the common 1.5x
+    to avoid over-flagging in categories with naturally high variance like Shopping)
     """
 
     results = []
@@ -40,30 +45,38 @@ def detect_transaction_outliers(df: pd.DataFrame) -> list:
         if len(cat_amounts) < 5:
             continue
 
-        mean = cat_amounts.mean()
-        std  = cat_amounts.std()
+        q1  = cat_amounts.quantile(0.25)
+        q3  = cat_amounts.quantile(0.75)
+        iqr = q3 - q1
 
-        if std == 0:
+        if iqr == 0:
             continue
 
-        # vectorized z-score instead of row-by-row iterrows
-        z_scores = (cat_amounts - mean) / std
-        outliers = group[z_scores > 3.0]
+        # 2.0x IQR = stricter threshold — flags truly unusual, not just above-average
+        upper_fence = q3 + 2.0 * iqr
+        median      = cat_amounts.median()
+        outlier_mask = cat_amounts > upper_fence
+        outliers     = group[outlier_mask]
 
         for idx, row in outliers.iterrows():
+            amount = float(row["amount"])
+            # how many IQRs above Q3 (analogous to z-score but robust)
+            iqr_score = round((amount - q3) / iqr, 1)
+
             results.append({
-                "merchant":     row.get("merchant", "Unknown"),
-                "amount":       round(float(row["amount"]), 2),
-                "date":         str(row.get("date", "")),
-                "category":     category,
-                "category_avg": round(float(mean), 2),
-                "category_std": round(float(std), 2),
-                "z_score":      round(float(z_scores[idx]), 1),
-                "confidence":   "HIGH",
+                "merchant":        row.get("merchant", "Unknown"),
+                "amount":          round(amount, 2),
+                "date":            str(row.get("date", "")),
+                "category":        category,
+                "category_median": round(float(median), 2),
+                "category_avg":    round(float(cat_amounts.mean()), 2),
+                "upper_fence":     round(float(upper_fence), 2),
+                "iqr_score":       iqr_score,
+                "confidence":      "HIGH" if iqr_score >= 3.0 else "MEDIUM",
             })
 
-    # sort by z-score descending (most unusual first)
-    results.sort(key=lambda x: x["z_score"], reverse=True)
+    # sort by iqr_score descending (most unusual first)
+    results.sort(key=lambda x: x["iqr_score"], reverse=True)
 
     return results
 
@@ -141,32 +154,44 @@ def detect_new_merchants(df: pd.DataFrame, lookback_days: int = 30) -> list:
     """
     Merchants appearing for the first time recently
 
-    Filters out:
-      - transactions < $5 (noise)
-      - one-time appearances (no pattern to flag)
+    Two detection modes:
+      1. Repeated new merchants (count >= 2, avg > $5) — may be a new subscription
+      2. High-value one-time charges (count == 1, amount > 3x overall median) — suspicious
     """
 
     results = []
     dates   = pd.to_datetime(df["date"])
     cutoff  = dates.max() - pd.Timedelta(days=lookback_days)
 
+    # overall median for "high-value" threshold
+    overall_median = float(df["amount"].median()) if len(df) > 0 else 50
+    high_value_threshold = max(overall_median * 3, 50)  # at least $50
+
     # first appearance date per merchant
     first_seen = df.groupby("merchant").agg(
         first_date  = ("date", "min"),
         count       = ("date", "count"),
         avg_amount  = ("amount", "mean"),
+        max_amount  = ("amount", "max"),
     )
 
     first_seen["first_date"] = pd.to_datetime(first_seen["first_date"])
 
-    # new = first appeared after cutoff, appeared more than once, avg > $5
-    new_merchants = first_seen[
+    # mode 1: repeated new merchants (potential new subscriptions)
+    repeated_new = first_seen[
         (first_seen["first_date"] >= cutoff) &
         (first_seen["count"] >= 2) &
         (first_seen["avg_amount"] >= 5)
     ]
 
-    for merchant, row in new_merchants.iterrows():
+    # mode 2: high-value one-time charges from unknown merchants
+    one_time_high = first_seen[
+        (first_seen["first_date"] >= cutoff) &
+        (first_seen["count"] == 1) &
+        (first_seen["max_amount"] >= high_value_threshold)
+    ]
+
+    for merchant, row in repeated_new.iterrows():
 
         # check if it looks recurring (monthly-ish interval)
         merchant_dates = pd.to_datetime(df[df["merchant"] == merchant]["date"]).sort_values()
@@ -181,7 +206,6 @@ def detect_new_merchants(df: pd.DataFrame, lookback_days: int = 30) -> list:
             elif 6 <= avg_gap <= 8:
                 recurrence = "weekly"
 
-        # get category if available
         cat = df[df["merchant"] == merchant]["category"].iloc[0] if "category" in df.columns else "Unknown"
 
         results.append({
@@ -191,6 +215,19 @@ def detect_new_merchants(df: pd.DataFrame, lookback_days: int = 30) -> list:
             "occurrences": int(row["count"]),
             "avg_amount":  round(float(row["avg_amount"]), 2),
             "recurrence":  recurrence,
+        })
+
+    for merchant, row in one_time_high.iterrows():
+        cat = df[df["merchant"] == merchant]["category"].iloc[0] if "category" in df.columns else "Unknown"
+
+        results.append({
+            "merchant":    merchant,
+            "category":    cat,
+            "first_seen":  str(row["first_date"].date()) if hasattr(row["first_date"], "date") else str(row["first_date"]),
+            "occurrences": 1,
+            "avg_amount":  round(float(row["max_amount"]), 2),
+            "recurrence":  "one-time",
+            "high_value":  True,
         })
 
     return results

@@ -25,6 +25,9 @@ export default function SpendingBars({ categories }) {
 
   if (!categories || !categories.length) return null;
 
+  // bar width is proportional to actual monthly avg (highest = 90%)
+  const maxAvg = Math.max(...categories.map(c => c.avg), 1);
+
 
   return (
     <div className="card card--hero" ref={containerRef}>
@@ -41,52 +44,61 @@ export default function SpendingBars({ categories }) {
 
 
       {/* spending bars */}
-      {categories.map(c => (
-        <div key={c.label} className="spend-bar" data-tooltip={c.tip}>
+      {categories.map(c => {
+        const barPct = Math.round((c.avg / maxAvg) * 90);
 
-          {/* label */}
-          <div className="spend-bar__label">
-            <div className="text-md fw-600">{c.label}</div>
-            <div className="text-xs ink-muted">{c.range}/mo</div>
-          </div>
+        return (
+          <div key={c.label} className="spend-bar" data-tooltip={c.tip}>
 
-          {/* bar track */}
-          <div className="spend-bar__track">
-            <div
-              className="spend-bar__fill"
-              style={{
-                background: c.color,
-                width: animated ? `${c.pct}%` : 0,
-              }}
-            >
-              {c.pct > 30 && (
-                <span className="text-xs fw-600" style={{ color: '#fff' }}>${c.avg}/mo</span>
+            {/* label */}
+            <div className="spend-bar__label">
+              <div className="text-md fw-600">{c.label}</div>
+              <div className="text-xs ink-muted">{c.range}/mo</div>
+            </div>
+
+            {/* bar track */}
+            <div className="spend-bar__track">
+              <div
+                className="spend-bar__fill"
+                style={{
+                  background: c.color,
+                  width: animated ? `${barPct}%` : 0,
+                }}
+              >
+                {barPct > 30 && (
+                  <span className="text-xs fw-600" style={{ color: '#fff' }}>${c.avg}/mo</span>
+                )}
+              </div>
+
+              {barPct <= 30 && (
+                <span style={{
+                  position: 'absolute',
+                  left: `calc(${barPct}% + 8px)`,
+                  top: '50%',
+                  transform: 'translateY(-50%)',
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: 'var(--ink)',
+                }}>
+                  ${c.avg}/mo
+                </span>
               )}
             </div>
 
-            {c.pct <= 30 && (
-              <span style={{
-                position: 'absolute',
-                left: `calc(${c.pct}% + 8px)`,
-                top: '50%',
-                transform: 'translateY(-50%)',
-                fontSize: 11,
-                fontWeight: 600,
-                color: 'var(--ink)',
-              }}>
-                ${c.avg}/mo
-              </span>
-            )}
-          </div>
+            {/* dollar amount + variance tag */}
+            <div className="spend-bar__amt">
+              <span className="text-sm fw-700">${c.avg}</span>
+              <span className="text-xs ink-muted">/mo avg</span>
+              {c.varianceTag && (
+                <span className="text-xs ink-faint" style={{ display: 'block', marginTop: 1, fontSize: 10 }}>
+                  {c.varianceTag}
+                </span>
+              )}
+            </div>
 
-          {/* dollar amount */}
-          <div className="spend-bar__amt">
-            <span className="text-sm fw-700">${c.avg}</span>
-            <span className="text-xs ink-muted">/mo avg</span>
           </div>
-
-        </div>
-      ))}
+        );
+      })}
 
     </div>
   );

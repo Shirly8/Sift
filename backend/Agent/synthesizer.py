@@ -17,8 +17,12 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from LLM.client import call_llm, extract_json
 
 
-# words that should NEVER appear in insights
-BANNED_WORDS = ["should", "bad", "problem", "waste", "too much", "excessive"]
+# words that should NEVER appear in insights — expanded to catch subtle judgment
+BANNED_WORDS = [
+    "should", "bad", "problem", "waste", "too much", "excessive",
+    "avoid", "excess", "splurge", "cut back", "habit", "frequent",
+    "overspend", "reckless", "irresponsible", "guilty", "alarming",
+]
 
 # categories the AI must never suggest cutting — the AI sees numbers, not context
 ESSENTIAL_CATEGORIES = {"groceries", "grocery", "rent", "mortgage", "healthcare",
@@ -32,16 +36,22 @@ ESSENTIAL_CATEGORIES = {"groceries", "grocery", "rent", "mortgage", "healthcare"
 
 def synthesize_insights(tool_results: dict, profile: dict, llm_call=None) -> list:
     """
-    Synthesize tool outputs into ranked insights via LLM.
-    Routes to Claude (prod) or Ollama (local dev) — both go through call_llm.
-    Returns [] if LLM is unavailable.
+    Cross-reference tool outputs into ranked insights.
+    LLM synthesis is only used as a fallback when cross-refs produce < 2 insights
+    — this avoids a wasted LLM call in the common case where cross-refs already
+    cover the data, and reduces hallucination risk from LLM-generated dollar amounts.
     """
 
-    fn = llm_call or call_llm
-    insights = _synthesize_with_llm(tool_results, profile, fn)
-
     cross_refs = _cross_reference(tool_results)
-    insights.extend(cross_refs)
+
+    # only call LLM if cross-refs didn't find enough patterns
+    if len(cross_refs) < 2:
+        fn = llm_call or call_llm
+        llm_insights = _synthesize_with_llm(tool_results, profile, fn)
+        cross_refs.extend(llm_insights)
+
+    insights = _fact_check_dollar_impacts(cross_refs, tool_results)
+    insights = _deduplicate_insights(insights)
 
     return rank_insights_by_impact(insights)
 
@@ -70,7 +80,7 @@ DATA PROFILE:
 Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact": 0, "confidence": "HIGH", "action_option": "...", "tool_source": "..."}}]"""
 
     try:
-        raw      = llm_call(prompt, temperature=0.3, max_tokens=1500)
+        raw      = llm_call(prompt, temperature=0.0, max_tokens=1500)
         insights = json.loads(extract_json(raw))
 
         # validate framing
@@ -205,6 +215,28 @@ def _cross_reference(tool_results: dict) -> list:
             })
 
 
+    # financial resilience + spending drivers = targeted runway insight
+    resilience = tool_results.get("financial_resilience", {})
+    runway     = resilience.get("runway", {})
+
+    if runway.get("months_of_runway") and runway["months_of_runway"] != float('inf') and impact.get("model_valid"):
+
+        top_driver = impact["impacts"][0]
+        months     = runway["months_of_runway"]
+
+        cross_refs.append({
+            "title":         f"{months:.0f}-month financial runway",
+            "description":   (
+                f"At your current burn rate, savings would last ~{months:.0f} months without income. "
+                f"{top_driver['category']} is your most variable cost — reducing it would extend runway."
+            ),
+            "dollar_impact": 0,
+            "confidence":    "HIGH" if months < 6 else "MEDIUM",
+            "action_option": f"One option would be reducing {top_driver['category']} spending to extend your runway." if months < 12 else None,
+            "tool_source":   "cross_reference",
+        })
+
+
     if cross_refs:
         print(f"Cross-referenced {len(cross_refs)} compound insights")
 
@@ -251,6 +283,136 @@ def validate_insight_framing(insight: dict) -> bool:
             return False
 
     return True
+
+
+
+####################################
+# STEP 5: DEDUPLICATE INSIGHTS
+####################################
+
+def _deduplicate_insights(insights: list) -> list:
+    """
+    Remove duplicate insights that cover the same pattern/category.
+    Cross-reference insights (tool_source="cross_reference") are preferred
+    over LLM-generated ones because they're grounded in real data.
+    """
+
+    seen_categories = set()
+    deduped = []
+
+    # sort so cross_reference insights come first (they're more trustworthy)
+    prioritized = sorted(insights, key=lambda x: 0 if x.get("tool_source") == "cross_reference" else 1)
+
+    for insight in prioritized:
+        title = insight.get("title", "").lower()
+        desc  = insight.get("description", "").lower()
+        text  = f"{title} {desc}"
+
+        # extract primary category/topic from the insight
+        key = _extract_insight_key(text)
+
+        if key and key in seen_categories:
+            print(f"Deduped insight (overlaps with '{key}'): {insight.get('title', '')[:60]}")
+            continue
+
+        if key:
+            seen_categories.add(key)
+        deduped.append(insight)
+
+    removed = len(insights) - len(deduped)
+    if removed > 0:
+        print(f"Deduplicated {removed} overlapping insights")
+
+    return deduped
+
+
+def _extract_insight_key(text: str) -> str:
+    """Extract the primary topic from insight text for dedup comparison."""
+
+    # check for specific patterns that indicate the insight topic
+    topic_keywords = [
+        "subscription", "streaming", "payday", "weekend",
+        "dining", "delivery", "shopping", "entertainment",
+        "grocery", "transport", "correlation", "price creep",
+    ]
+
+    for keyword in topic_keywords:
+        if keyword in text:
+            return keyword
+
+    return None
+
+
+
+####################################
+# STEP 6: FACT-CHECK DOLLAR IMPACTS
+####################################
+
+def _fact_check_dollar_impacts(insights: list, tool_results: dict) -> list:
+    """
+    Validate that LLM-claimed dollar impacts are plausible given actual tool data.
+    Reject or zero-out impacts that don't match underlying computations.
+    """
+
+    # extract verifiable dollar amounts from tool results
+    known_amounts = _extract_known_amounts(tool_results)
+
+    checked = []
+    for insight in insights:
+        impact = insight.get("dollar_impact", 0)
+
+        # skip cross-reference insights (already computed from real data)
+        if insight.get("tool_source") == "cross_reference":
+            checked.append(insight)
+            continue
+
+        # skip if no dollar impact claimed
+        if not impact or impact == 0:
+            checked.append(insight)
+            continue
+
+        # check if the claimed impact is plausible
+        if known_amounts and impact > max(known_amounts) * 2:
+            print(f"Fact-check: Capped implausible impact ${impact} -> ${max(known_amounts)} for: {insight.get('title', '')[:50]}")
+            insight["dollar_impact"] = max(known_amounts)
+            insight["confidence"] = "MEDIUM"  # downgrade confidence
+
+        checked.append(insight)
+
+    return checked
+
+
+def _extract_known_amounts(tool_results: dict) -> list:
+    """Pull verifiable dollar amounts from tool outputs for fact-checking."""
+
+    amounts = []
+
+    # subscription totals
+    subs = tool_results.get("subscription_hunter", {})
+    if subs.get("subscriptions"):
+        for sub in subs["subscriptions"]:
+            if sub.get("annual_cost"):
+                amounts.append(sub["annual_cost"])
+    if subs.get("overlaps"):
+        for overlap in subs["overlaps"]:
+            if overlap.get("combined_annual"):
+                amounts.append(overlap["combined_annual"])
+
+    # price creep totals
+    if subs.get("price_creep"):
+        for pc in subs["price_creep"]:
+            if pc.get("annual_cost_increase"):
+                amounts.append(pc["annual_cost_increase"])
+
+    # spending impact — monthly averages annualized
+    impact = tool_results.get("spending_impact", {})
+    if impact.get("impacts"):
+        for imp in impact["impacts"]:
+            avg = imp.get("monthly_avg", 0)
+            if avg > 0:
+                amounts.append(avg * 12)
+
+    return amounts
 
 
 

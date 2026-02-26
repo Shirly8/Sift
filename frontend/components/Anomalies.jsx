@@ -28,9 +28,9 @@ export default function Anomalies({ data }) {
 
       <div className="section-header">
         <div>
-          <h3 className="heading-card">Anomalies Detected</h3>
+          <h3 className="heading-card">Unusual Spending</h3>
           <p className="text-sm ink-muted" style={{ marginTop: 4 }}>
-            Unusual activity Sift found in your transactions
+            Things that stood out in your transactions
           </p>
         </div>
       </div>
@@ -86,7 +86,7 @@ export default function Anomalies({ data }) {
             <div>
               <div className="text-md fw-600">{out.merchant}</div>
               <div className="text-xs ink-muted">
-                {out.category} &middot; {out.date} &middot; {out.z_score}x above normal
+                {out.category} &middot; {out.date} &middot; Much higher than usual
               </div>
             </div>
           </div>

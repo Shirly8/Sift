@@ -36,7 +36,7 @@ export default function PatternCards({ patterns }) {
         {patterns.map(p => (
           <div
             key={p.title}
-            style={{ padding: '14px 16px', background: 'var(--bg)', borderRadius: 'var(--r-md)' }}
+            className={`pattern-item pattern-item--${p.direction === 'inverse' ? 'inverse' : 'correlated'}`}
           >
             <div className="flex gap-3">
 

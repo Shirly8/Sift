@@ -131,8 +131,6 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
         if bad_dates / len(df) > 0.05:
             raise ValueError(f"Date parsing failed on {bad_dates}/{len(df)} rows — check format")
 
-        out["date"] = out["date"].dt.strftime("%Y-%m-%d")
-
 
     # AMOUNT — abs() handles banks that export debits as negatives
     # strips currency symbols (e.g., '$1,234.56' -> '1234.56')
@@ -158,6 +156,11 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
     out["category"] = ""
 
     out = out.dropna(subset=["date", "amount"])
+
+    # ensure date column is datetime — parse once here so downstream tools
+    # don't need to call pd.to_datetime() repeatedly on every analysis
+    out["date"] = pd.to_datetime(out["date"], errors="coerce")
+    out = out.dropna(subset=["date"])
 
     print(f"Normalized {len(out)} transactions from {format_type} format")
     return out

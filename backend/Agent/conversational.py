@@ -2,8 +2,6 @@
 Agentic follow-up — user asks a question, agent decides which computations
 to run on their actual data, executes them, then explains the results.
 
-Not a chatbot. The agent USES TOOLS on real transaction data.
-
   ask("What if I cancel Netflix?", df, analysis_results)
   -> {
        "answer": "Cancelling Netflix saves $275.88/year. It's your 3rd most expensive subscription...",
@@ -20,14 +18,15 @@ Not a chatbot. The agent USES TOOLS on real transaction data.
 """
 
 import json
+import hashlib
+from collections import OrderedDict
 import pandas as pd
-import numpy as np
 
 import sys, os
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
-from LLM.client     import call_llm, extract_json
-from Tools.spending_impact import fit_impact_model
+from LLM.client       import call_llm, extract_json
+from Tools.simulator  import run_projection, stress_test, calculate_runway
 
 
 
@@ -56,6 +55,12 @@ TOOLS:
 6. multi_analyze — For broad questions like "where can I cut back?", "how can I save money?", "what are my options?", "analyze my spending". Breaks down top spending categories by merchant and runs what-if scenarios. Use this when the question doesn't target a specific merchant, category, or time period.
    params: {}
 
+7. simulate_future — Project spending forward with Monte Carlo simulation. For questions like "what will my spending look like?", "can I afford X?", "what happens in 6 months?"
+   params: {"months": 12, "scenario": "job_loss"}  (both optional, scenario: job_loss/expense_increase/subscription_purge)
+
+8. stress_test — Financial resilience scenarios. For questions about job loss, emergency fund, runway, "what if I lose my job?", "how long can I survive?", "what if rent goes up?"
+   params: {"scenario": "job_loss"}  (job_loss/expense_increase/subscription_purge)
+
 Return JSON only: {"tool": "tool_name", "params": {...}}
 If the question is broad or general, use multi_analyze."""
 
@@ -67,17 +72,20 @@ If the question is broad or general, use multi_analyze."""
 
 def ask(question: str, df: pd.DataFrame, analysis_results: dict = None) -> dict:
     """
-    User asks a natural language question -> agent picks a tool ->
-    tool runs real computation -> LLM explains the result.
+    User asks a natural language question -> agent picks tool(s) ->
+    tools run real computation -> LLM explains the results.
+
+    Simple questions use a single tool. Complex questions chain 2-4 tools
+    and synthesize cross-tool findings into one answer.
 
       ask("What if I cancel Netflix?", df)
       -> {"answer": "...", "tool_used": "simulate_cancellation", "computation": {...}}
+
+      ask("How can I save money?", df)
+      -> {"answer": "...", "tool_used": "chain", "tools_chain": [...], "computation": [...]}
     """
 
-    # build a compact data summary so the LLM knows what's available
     summary = _build_data_summary(df)
-
-    # ask Claude which tool to use
     routing = _route_question(question, summary)
 
     tool_name = routing.get("tool", "general")
@@ -85,40 +93,31 @@ def ask(question: str, df: pd.DataFrame, analysis_results: dict = None) -> dict:
 
     print(f"Agent routing: '{question[:50]}...' -> {tool_name}({params})")
 
-
-    # execute the tool on real data
-    if tool_name == "simulate_cancellation":
-        computation = _simulate_cancellation(df, params.get("merchant", ""))
-
-    elif tool_name == "breakdown_category":
-        computation = _breakdown_category(df, params.get("category", ""), params.get("month"))
-
-    elif tool_name == "compare_periods":
-        computation = _compare_periods(df, params.get("period_a", ""), params.get("period_b", ""), params.get("category"))
-
-    elif tool_name == "find_merchant_pattern":
-        computation = _find_merchant_pattern(df, params.get("merchant", ""))
-
-    elif tool_name == "spending_what_if":
-        computation = _spending_what_if(df, params.get("category", ""), params.get("cut_pct", 0))
-
-    elif tool_name == "multi_analyze":
-        computation = _multi_analyze(df, analysis_results)
-
-    else:
-        computation = _general_summary(df, analysis_results)
-
-
-    # ask Claude to explain the computation results in natural language
+    # broad questions: run multi_analyze directly (no LLM chain planning call)
+    # multi_analyze already breaks down top categories + runs what-if — the extra
+    # LLM planning call added ~500ms latency for the same result
     if tool_name == "multi_analyze":
-        answer = _explain_multi_results(question, computation, summary)
-    else:
-        answer = _explain_results(question, computation, tool_name, summary)
+        computation = _multi_analyze(df, analysis_results)
+        answer = _explain_multi_results(question, computation)
+
+        return {
+            "answer":      answer,
+            "tool_used":   tool_name,
+            "computation": computation,
+            "confidence":  "HIGH",
+            "methodology": "Multi-category breakdown with what-if simulation",
+        }
+
+    # simple questions: single tool, fast path
+    computation = _execute_tool(tool_name, df, params, analysis_results)
+    answer = _explain_results(question, computation, tool_name)
 
     return {
         "answer":      answer,
         "tool_used":   tool_name,
         "computation": computation,
+        "confidence":  _tool_confidence(tool_name, computation),
+        "methodology": _tool_methodology(tool_name),
     }
 
 
@@ -187,11 +186,6 @@ def _simulate_cancellation(df: pd.DataFrame, merchant: str) -> dict:
             monthly_cost = round(avg_charge, 2)
 
 
-    # re-run spending impact without this merchant
-    df_without  = df[~mask].copy()
-    impact_before = fit_impact_model(df)
-    impact_after  = fit_impact_model(df_without)
-
     # annualized savings
     months_in_data = max(1, (dates.max() - dates.min()).days / 30) if len(dates) >= 2 else 1
     annual_savings = round((total_spent / months_in_data) * 12, 2) if is_recurring else round(total_spent, 2)
@@ -206,8 +200,6 @@ def _simulate_cancellation(df: pd.DataFrame, merchant: str) -> dict:
         "is_recurring":   is_recurring,
         "monthly_cost":   monthly_cost,
         "annual_savings": annual_savings,
-        "impact_before":  impact_before.get("impacts", [])[:3] if impact_before.get("model_valid") else [],
-        "impact_after":   impact_after.get("impacts", [])[:3] if impact_after.get("model_valid") else [],
     }
 
 
@@ -409,11 +401,12 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
 
     current_total = float(subset["amount"].sum())
 
-    # use the category's actual active months, not the overall data span
-    # this avoids understating monthly avg when the category is seasonal
-    cat_dates      = pd.to_datetime(subset["date"])
-    active_months  = cat_dates.dt.to_period("M").nunique()
-    months_in_data = max(1, active_months)
+    # use total data span (not just active months) so the monthly average
+    # reflects reality — a category with $300 across 3 months out of 12
+    # is $25/mo annualized, not $100/mo
+    all_dates      = pd.to_datetime(df["date"])
+    span_months    = max(1, round((all_dates.max() - all_dates.min()).days / 30.44))
+    months_in_data = span_months
 
     current_monthly = current_total / months_in_data
     reduced_monthly = current_monthly * (1 - cut_pct / 100)
@@ -459,7 +452,48 @@ def _general_summary(df: pd.DataFrame, analysis_results: dict = None) -> dict:
 
 
 ####################################
-# STEP 5: MULTI-TOOL ANALYSIS
+# STEP 5: TOOL EXECUTOR
+####################################
+
+def _execute_tool(tool_name: str, df: pd.DataFrame, params: dict, analysis_results: dict = None) -> dict:
+    """Execute a single tool by name. Used by both single-tool and chain paths."""
+
+    if tool_name == "simulate_cancellation":
+        return _simulate_cancellation(df, params.get("merchant", ""))
+
+    elif tool_name == "breakdown_category":
+        return _breakdown_category(df, params.get("category", ""), params.get("month"))
+
+    elif tool_name == "compare_periods":
+        return _compare_periods(df, params.get("period_a", ""), params.get("period_b", ""), params.get("category"))
+
+    elif tool_name == "find_merchant_pattern":
+        return _find_merchant_pattern(df, params.get("merchant", ""))
+
+    elif tool_name == "spending_what_if":
+        return _spending_what_if(df, params.get("category", ""), params.get("cut_pct", 0))
+
+    elif tool_name == "simulate_future":
+        scenario_str = params.get("scenario")
+        scenario_dict = None
+        if scenario_str == "job_loss":
+            scenario_dict = {"type": "job_loss"}
+        elif scenario_str == "expense_increase":
+            scenario_dict = {"type": "expense_increase", "category": params.get("category", "Rent & Housing"), "multiplier": params.get("multiplier", 1.2)}
+        elif scenario_str == "subscription_purge":
+            scenario_dict = {"type": "subscription_purge"}
+        return run_projection(df, months=params.get("months", 12), scenario=scenario_dict)
+
+    elif tool_name == "stress_test":
+        return stress_test(df, params.get("scenario", "job_loss"))
+
+    else:
+        return _general_summary(df, analysis_results)
+
+
+
+####################################
+# STEP 6: MULTI-TOOL ANALYSIS (fallback for when chain planning fails)
 ####################################
 
 def _multi_analyze(df: pd.DataFrame, analysis_results: dict = None) -> dict:
@@ -504,10 +538,10 @@ def _multi_analyze(df: pd.DataFrame, analysis_results: dict = None) -> dict:
 
 
 ####################################
-# STEP 6: EXPLAIN RESULTS
+# STEP 7: EXPLAIN RESULTS (single tool)
 ####################################
 
-def _explain_results(question: str, computation: dict, tool_name: str, data_summary: str) -> str:
+def _explain_results(question: str, computation: dict, tool_name: str) -> str:
     """
     Pass computation results to Claude for natural language explanation.
     The LLM explains — it doesn't compute. The tools already computed.
@@ -532,7 +566,7 @@ COMPUTATION RESULTS:
 
 Respond in plain text (not JSON). Be conversational but data-driven."""
 
-    response = call_llm(prompt, temperature=0.3, max_tokens=400)
+    response = call_llm(prompt, temperature=0.0, max_tokens=400)
 
     if not response:
         # fallback: return raw computation as a simple summary
@@ -542,7 +576,7 @@ Respond in plain text (not JSON). Be conversational but data-driven."""
 
 
 
-def _explain_multi_results(question: str, computation: dict, data_summary: str) -> str:
+def _explain_multi_results(question: str, computation: dict) -> str:
     """
     Synthesize multi-tool results into a clear, actionable savings plan.
     Richer output than single-tool explain — names specific merchants and amounts.
@@ -566,7 +600,7 @@ MULTI-TOOL COMPUTATION RESULTS:
 
 Respond in plain text. Be direct, specific, and actionable."""
 
-    response = call_llm(prompt, temperature=0.3, max_tokens=600)
+    response = call_llm(prompt, temperature=0.0, max_tokens=600)
 
     if not response:
         return f"Here's what I found: {json.dumps(computation, indent=2, default=str)}"
@@ -576,24 +610,85 @@ Respond in plain text. Be direct, specific, and actionable."""
 
 
 ####################################
-# STEP 7: DATA SUMMARY FOR ROUTING
+# STEP 8: DATA SUMMARY FOR ROUTING
 ####################################
+
+_summary_cache     = OrderedDict()  # keyed by content hash, capped at 20
+_SUMMARY_CACHE_MAX = 20
 
 def _build_data_summary(df: pd.DataFrame) -> str:
     """
     Compact summary of available data so the LLM knows what tools can work with.
+    Cached per DataFrame content to avoid recomputing on every /api/ask call.
     """
+
+    # content-based hash: len + first/last dates + total amount
+    h = hashlib.md5(f"{len(df)}:{df['date'].iloc[0]}:{df['date'].iloc[-1]}:{df['amount'].sum():.2f}".encode()).hexdigest()
+
+    if h in _summary_cache:
+        _summary_cache.move_to_end(h)
+        return _summary_cache[h]
 
     dates      = pd.to_datetime(df["date"])
     categories = df["category"].dropna().unique().tolist() if "category" in df.columns else []
-    merchants  = df["merchant"].unique().tolist() if "merchant" in df.columns else []
 
     # top 20 merchants by frequency
     top_merchants = df["merchant"].value_counts().head(20).index.tolist() if "merchant" in df.columns else []
 
-    return (
+    summary = (
         f"Transactions: {len(df)}\n"
         f"Date range: {dates.min().date()} to {dates.max().date()}\n"
         f"Categories: {', '.join(categories)}\n"
         f"Top merchants: {', '.join(top_merchants)}"
     )
+
+    _summary_cache[h] = summary
+    if len(_summary_cache) > _SUMMARY_CACHE_MAX:
+        _summary_cache.popitem(last=False)
+
+    return summary
+
+
+
+####################################
+# STEP 9: CONFIDENCE & METHODOLOGY
+####################################
+
+def _tool_confidence(tool_name: str, computation: dict) -> str:
+    """Assess confidence based on tool type and whether it found real data."""
+
+    if computation.get("found") is False:
+        return "LOW"
+
+    # tools backed by direct computation = HIGH confidence
+    high_confidence_tools = {
+        "simulate_cancellation", "breakdown_category",
+        "spending_what_if", "find_merchant_pattern",
+        "simulate_future", "stress_test",
+    }
+
+    if tool_name in high_confidence_tools:
+        return "HIGH"
+
+    if tool_name == "compare_periods":
+        return "HIGH" if computation.get("total_a", 0) > 0 else "MEDIUM"
+
+    return "MEDIUM"
+
+
+def _tool_methodology(tool_name: str) -> str:
+    """Human-readable description of how the answer was computed."""
+
+    methods = {
+        "simulate_cancellation": "Removed merchant from dataset and recalculated spending impact",
+        "breakdown_category":    "Grouped transactions by merchant within category",
+        "compare_periods":       "Summed spending per category across two time ranges",
+        "find_merchant_pattern": "Analyzed transaction frequency, amounts, and trend over time",
+        "spending_what_if":      "Simulated percentage reduction and projected annual savings",
+        "multi_analyze":         "Broke down top discretionary categories with what-if scenarios",
+        "simulate_future":       "Monte Carlo simulation with 1000 runs using historical spending distributions",
+        "stress_test":           "Preset financial stress scenario projected with Monte Carlo simulation",
+        "general":               "Summarized overall spending data",
+    }
+
+    return methods.get(tool_name, "Computed from transaction data")

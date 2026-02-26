@@ -12,6 +12,7 @@ import InsightCards from './InsightCards';
 import SavingsPlan from './SavingsPlan';
 import SpendingHabits from './SpendingHabits';
 import Anomalies from './Anomalies';
+import FinancialResilience from './FinancialResilience';
 import UploadModal from './UploadModal';
 import Toast from './Toast';
 
@@ -49,11 +50,11 @@ class ErrorBoundary extends Component {
 }
 
 
-export default function Dashboard({ initialShowUpload = false }) {
+export default function Dashboard({ initialShowUpload = false, initialSessionId = null, initialAnalysisData = null }) {
 
   // upload + analysis state
-  const [sessionId, setSessionId] = useState(null);
-  const [analysisData, setAnalysisData] = useState(null);
+  const [sessionId, setSessionId] = useState(initialSessionId);
+  const [analysisData, setAnalysisData] = useState(initialAnalysisData);
   const [loading, setLoading] = useState(false);
 
   // SSE progress — just an array of step strings from the backend
@@ -68,6 +69,9 @@ export default function Dashboard({ initialShowUpload = false }) {
 
   // fade-in on mount
   const [loaded, setLoaded] = useState(false);
+
+  // tab navigation
+  const [activeTab, setActiveTab] = useState('overview');
 
   useEffect(() => { setLoaded(true) }, []);
 
@@ -171,11 +175,14 @@ export default function Dashboard({ initialShowUpload = false }) {
   // Anomalies: build from anomaly_detection results
   const anomalyData = buildAnomalies(results);
 
-  // Compute annual savings potential from subscription overlap data
-  const savingsPotential = computeSavingsPotential(results, analysisData?.insights);
+  // FinancialResilience: stress test + runway from simulator
+  const resilienceData = buildResilience(results);
 
   // Savings plan: concrete opportunities from backend
   const savingsPlan = analysisData?.savings_plan || null;
+
+  // Compute annual savings potential — uses deduplicated savings_plan to avoid double-counting
+  const savingsPotential = computeSavingsPotential(results, analysisData?.insights, savingsPlan);
 
 
   return (
@@ -306,32 +313,56 @@ export default function Dashboard({ initialShowUpload = false }) {
         )}
 
 
-        {/* ===== MAIN CONTENT GRID ===== */}
-        <div className="main-grid-wide" style={fadeIn(0.2)}>
+        {/* TAB NAVIGATION */}
+        <div className="tab-nav" style={fadeIn(0.18)}>
+          {[
+            { key: 'overview', label: 'Overview' },
+            { key: 'health', label: 'Check-Up' },
+          ].map(t => (
+            <button
+              key={t.key}
+              className={`tab-nav__item ${activeTab === t.key ? 'tab-nav__item--active' : ''}`}
+              onClick={() => setActiveTab(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
 
 
-          {/* LEFT COLUMN */}
-          <div className="flex flex-col gap-4">
+        {/* TAB CONTENT */}
+        <div className="dashboard-sections tab-content" key={activeTab}>
 
-            <SpendingBars categories={spendingBarsData} />
+          {activeTab === 'overview' && (
+            <>
+              <div className="bento-row bento-row--wide bento-row--stretch">
+                <SpendingBars categories={spendingBarsData} />
+                <InsightCards insights={insightsData} />
+              </div>
+              <div className="bento-row bento-row--wide">
+                <div className="bento-stack">
+                  <TrendChart categories={trendData.categories} months={trendData.months} />
+                  <Subscriptions subscriptions={subscriptionData} />
+                </div>
+                <div className="bento-stack">
+                  <PatternCards patterns={patternData} />
+                  <SavingsPlan plan={savingsPlan} />
+                </div>
+              </div>
+            </>
+          )}
 
-            <div className="split-grid">
-              <TrendChart categories={trendData.categories} months={trendData.months} />
-              <PatternCards patterns={patternData} />
-            </div>
-
-            <Subscriptions subscriptions={subscriptionData} />
-
-            <Anomalies data={anomalyData} />
-          </div>
-
-
-          {/* RIGHT COLUMN */}
-          <div className="flex flex-col gap-4">
-            <SavingsPlan plan={savingsPlan} />
-            <InsightCards insights={insightsData} />
-            <SpendingHabits data={habitsData} />
-          </div>
+          {activeTab === 'health' && (
+            <>
+              <div className="bento-row bento-row--wide">
+                {resilienceData && <FinancialResilience data={resilienceData} />}
+                <div className="bento-stack">
+                  <Anomalies data={anomalyData} />
+                  <SpendingHabits data={habitsData} />
+                </div>
+              </div>
+            </>
+          )}
 
         </div>
 
@@ -394,13 +425,17 @@ function buildSpendingBars(results) {
   const impacts = impact.impacts;
   if (!impacts.length) return undefined;
 
-  return impacts.slice(0, 7).map((imp, i) => ({
-    label:  imp.category,
-    avg:    Math.round(imp.monthly_avg || imp.monthly_std * 3),
-    range:  `\u00B1$${Math.round(imp.monthly_std)}`,
-    color:  getCategoryColor(imp.category, i),
-    pct:    Math.round(imp.impact_pct),
-    tip:    `${imp.category}: ~$${Math.round(imp.monthly_avg || imp.monthly_std * 3)}/mo avg, ${imp.impact_pct}% of your spending variance.`,
+  // sort by monthly_avg descending so bars show actual spending rank
+  const sorted = [...impacts].sort((a, b) => (b.monthly_avg || 0) - (a.monthly_avg || 0));
+
+  return sorted.slice(0, 7).map((imp, i) => ({
+    label:      imp.category,
+    avg:        Math.round(imp.monthly_avg || 0),
+    range:      `\u00B1$${Math.round(imp.monthly_std)}`,
+    color:      getCategoryColor(imp.category, i),
+    pct:        Math.round(imp.impact_pct),
+    varianceTag: `${Math.round(imp.impact_pct)}% of variance`,
+    tip:        `${imp.category}: ~$${Math.round(imp.monthly_avg || 0)}/mo avg, ${imp.impact_pct}% of your spending variance.`,
   }));
 }
 
@@ -546,36 +581,32 @@ function buildAnomalies(results) {
 }
 
 
-function computeSavingsPotential(results, insights) {
+function buildResilience(results) {
+  const resilience = results.financial_resilience;
+  if (!resilience?.runway || !resilience?.stress_test) return undefined;
+  return resilience;
+}
+
+
+function computeSavingsPotential(results, insights, savingsPlan) {
+  // use the deduplicated savings_plan from backend — avoids double-counting
+  // between subscription overlaps, price creep, insights, and spike excess
+  if (savingsPlan?.total_annual_savings) {
+    return Math.round(savingsPlan.total_annual_savings);
+  }
+
+  // fallback: simple sum if savings_plan wasn't generated
   let savings = 0;
 
-  // from subscription overlaps
   const subs = results.subscription_hunter;
   if (subs?.overlaps) {
     savings += subs.overlaps.reduce((sum, o) => sum + (o.potential_savings || 0), 0);
   }
 
-  // from price creep (annual cost increases)
   if (subs?.price_creep) {
     savings += subs.price_creep
       .filter(pc => pc.price_creep_detected)
       .reduce((sum, pc) => sum + (pc.annual_cost_increase || 0), 0);
-  }
-
-  // from insight dollar impacts (non-subscription to avoid double-counting)
-  if (insights?.length) {
-    savings += insights
-      .filter(ins => ins.dollar_impact > 0 && ins.tool_source !== 'cross_reference')
-      .reduce((sum, ins) => sum + (ins.dollar_impact || 0), 0);
-  }
-
-  // from spending spikes (excess above baseline)
-  const spikes = results.anomaly_detection?.spending_spikes;
-  if (spikes?.length) {
-    savings += spikes.reduce((sum, s) => {
-      const excess = (s.recent_month_total || 0) - (s.prior_avg || 0);
-      return sum + Math.max(0, excess) * 12;
-    }, 0);
   }
 
   return Math.round(savings);

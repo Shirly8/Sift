@@ -21,6 +21,7 @@ html {
 body {
   font-family: 'Plus Jakarta Sans', 'Helvetica Neue', sans-serif;
   background: #FAFAF8;
+  background-image: radial-gradient(ellipse at 50% 0%, rgba(207,85,50,0.025) 0%, transparent 50%);
   color: #1A1A2E;
   min-height: 100vh;
   overflow-x: hidden;
@@ -75,20 +76,20 @@ ul, ol { list-style: none }
   --ink-faint:     #C0C0C0;
 
   /* type scale */
-  --fs-xs:    10px;
+  --fs-xs:    9px;
   --fs-sm:    11px;
-  --fs-base:  13px;
-  --fs-md:    14px;
-  --fs-lg:    16px;
-  --fs-xl:    20px;
-  --fs-2xl:   26px;
-  --fs-3xl:   32px;
-  --fs-4xl:   48px;
+  --fs-base:  12px;
+  --fs-md:    13px;
+  --fs-lg:    15px;
+  --fs-xl:    18px;
+  --fs-2xl:   24px;
+  --fs-3xl:   30px;
+  --fs-4xl:   42px;
 
   /* spacing */
-  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px;  --sp-4: 16px;
-  --sp-5: 20px; --sp-6: 24px; --sp-7: 28px;  --sp-8: 32px;
-  --sp-10: 40px; --sp-12: 48px; --sp-16: 64px;
+  --sp-1: 3px;  --sp-2: 6px;  --sp-3: 10px;  --sp-4: 14px;
+  --sp-5: 18px; --sp-6: 22px; --sp-7: 26px;  --sp-8: 30px;
+  --sp-10: 36px; --sp-12: 44px; --sp-16: 56px;
 
   /* radii */
   --r-sm: 4px;  --r-md: 8px;  --r-lg: 12px;  --r-xl: 16px;
@@ -144,7 +145,7 @@ ul, ol { list-style: none }
 
 .heading-hero    { font-family: 'DM Serif Display', Georgia, serif; font-size: var(--fs-4xl); line-height: 1; letter-spacing: -0.02em }
 .heading-section { font-family: 'DM Serif Display', Georgia, serif; font-size: var(--fs-xl); letter-spacing: -0.01em }
-.heading-card    { font-family: 'DM Serif Display', Georgia, serif; font-size: 17px }
+.heading-card    { font-family: 'DM Serif Display', Georgia, serif; font-size: 16px }
 
 .ink       { color: var(--ink) }
 .ink-mid   { color: var(--ink-mid) }
@@ -194,13 +195,13 @@ ul, ol { list-style: none }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 22px 24px;
+  padding: 18px 20px;
   position: relative;
   overflow: hidden;
-  transition: border-color var(--dur-fast) ease, box-shadow var(--dur-fast) ease;
+  transition: border-color var(--dur-fast) ease, box-shadow 0.3s ease, transform 0.3s ease;
 }
-.card:hover { border-color: var(--border-hover) }
-.card--hero { padding: 22px 28px }
+.card:hover { border-color: var(--border-hover); box-shadow: var(--shadow-sm) }
+.card--hero { padding: 18px 22px }
 
 .card__accent {
   position: absolute; top: 0; left: 0; right: 0; height: 3px;
@@ -220,8 +221,8 @@ ul, ol { list-style: none }
 .metrics-row-equal {
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: var(--sp-4);
-  padding: var(--sp-5) 0;
+  gap: var(--sp-3);
+  padding: var(--sp-4) 0;
 }
 
 .main-grid-wide {
@@ -237,6 +238,79 @@ ul, ol { list-style: none }
 }
 
 
+/* Bento grid — flowing paired sections */
+.dashboard-sections {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
+
+.bento-row {
+  display: grid;
+  gap: var(--sp-3);
+  align-items: start;
+}
+.bento-row > * { min-width: 0 }
+.bento-row > :only-child { grid-column: 1 / -1 }
+
+.bento-row--stretch { align-items: stretch }
+.bento-row--stretch .card { overflow-y: auto }
+
+.bento-row--wide { grid-template-columns: 7fr 3fr }
+.bento-row--even { grid-template-columns: 1fr 1fr }
+.bento-row--trio { grid-template-columns: 5fr 2.5fr 2.5fr }
+
+/* Enhanced hover for dashboard content cards */
+.dashboard-sections .card {
+  transition: border-color var(--dur-fast) ease, box-shadow 0.3s ease, transform 0.3s ease;
+}
+.dashboard-sections .card:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 25px rgba(26,26,46,0.06);
+}
+
+
+
+/* ================================================================
+   TAB NAVIGATION
+   ================================================================ */
+
+.tab-nav {
+  display: inline-flex;
+  align-items: center;
+  background: var(--surface);
+  border-radius: var(--r-md);
+  padding: 3px;
+  gap: 2px;
+  margin-bottom: var(--sp-3);
+}
+
+.tab-nav__item {
+  padding: 6px 16px;
+  border-radius: 5px;
+  font-size: var(--fs-base);
+  font-weight: 600;
+  color: var(--ink-muted);
+  transition: all var(--dur-fast) ease;
+}
+.tab-nav__item:hover { color: var(--ink-soft) }
+
+.tab-nav__item--active {
+  background: var(--card);
+  color: var(--ink);
+  box-shadow: 0 1px 3px rgba(26,26,46,0.08);
+}
+
+.tab-content {
+  animation: tab-fade 0.35s var(--ease-out);
+}
+
+@keyframes tab-fade {
+  from { opacity: 0; transform: translateY(8px) }
+  to   { opacity: 1; transform: translateY(0) }
+}
+
+
 
 /* ================================================================
    HEADER
@@ -246,13 +320,13 @@ ul, ol { list-style: none }
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: var(--sp-5) 0;
+  padding: var(--sp-4) 0;
   border-bottom: 1px solid var(--border);
 }
 
 .logo {
   font-family: 'DM Serif Display', Georgia, serif;
-  font-size: var(--fs-2xl);
+  font-size: var(--fs-xl);
   font-weight: 400;
   letter-spacing: -0.02em;
   color: var(--terra);
@@ -397,22 +471,22 @@ ul, ol { list-style: none }
   background: var(--card);
   border: 1px solid var(--border);
   border-radius: var(--r-lg);
-  padding: 20px 28px;
-  margin-bottom: var(--sp-4);
+  padding: 14px 20px;
+  margin-bottom: var(--sp-3);
   transition: border-color 0.3s ease, box-shadow 0.3s ease;
 }
 .ask-bar:focus-within { border-color: var(--terra); box-shadow: var(--shadow-glow) }
 
 .ask-bar__input {
   flex: 1; border: none; outline: none;
-  font-size: 17px; font-family: inherit; font-weight: 500;
+  font-size: 14px; font-family: inherit; font-weight: 500;
   background: transparent; color: var(--ink);
   min-width: 0;
 }
 .ask-bar__input::placeholder { color: var(--ink-faint); font-weight: 400 }
 
 .ask-bar__send {
-  width: 40px; height: 40px; border-radius: var(--r-md);
+  width: 34px; height: 34px; border-radius: var(--r-md);
   display: flex; align-items: center; justify-content: center;
   background: var(--terra); flex-shrink: 0;
   transition: all var(--dur-fast) ease;
@@ -460,19 +534,19 @@ ul, ol { list-style: none }
    ================================================================ */
 
 .spend-bar {
-  display: flex; align-items: center; gap: var(--sp-3);
-  padding: 10px 0; cursor: pointer;
+  display: flex; align-items: center; gap: var(--sp-2);
+  padding: 7px 0; cursor: pointer;
   transition: background var(--dur-fast) ease;
   border-radius: var(--r-md);
-  margin: 0 -8px; padding-left: 8px; padding-right: 8px;
+  margin: 0 -6px; padding-left: 6px; padding-right: 6px;
 }
 .spend-bar:hover { background: var(--surface) }
 
-.spend-bar__label { width: 100px; flex-shrink: 0 }
+.spend-bar__label { width: 90px; flex-shrink: 0 }
 
 .spend-bar__track {
-  flex: 1; height: 28px; background: var(--surface);
-  border-radius: 6px; overflow: hidden; position: relative;
+  flex: 1; height: 22px; background: var(--surface);
+  border-radius: 5px; overflow: hidden; position: relative;
 }
 .spend-bar__fill {
   height: 100%; border-radius: 6px;
@@ -488,23 +562,30 @@ ul, ol { list-style: none }
    PATTERN CARD
    ================================================================ */
 
-.pattern-card {
-  padding: 16px 20px;
+.pattern-item {
+  padding: 14px 16px;
   background: var(--bg);
   border-radius: var(--r-md);
-  border: 1px solid transparent;
-  transition: all 0.25s var(--ease-out);
-  cursor: pointer;
+  border-left: 3px solid transparent;
+  transition: all var(--dur-fast) ease;
 }
-.pattern-card:hover { border-color: var(--border-hover); background: var(--card) }
+.pattern-item--correlated { border-left-color: var(--terra) }
+.pattern-item--inverse    { border-left-color: #2B6CB0 }
+.pattern-item:hover       { background: var(--card); box-shadow: var(--shadow-sm) }
 
 .pattern-card__arrow {
-  width: 28px; height: 28px; border-radius: 50%;
+  width: 30px; height: 30px; border-radius: 50%;
   display: flex; align-items: center; justify-content: center;
   flex-shrink: 0;
 }
 .pattern-card__arrow--up   { background: rgba(207,85,50,0.1) }
 .pattern-card__arrow--down { background: rgba(43,108,176,0.1) }
+
+.bento-stack {
+  display: flex;
+  flex-direction: column;
+  gap: var(--sp-3);
+}
 
 
 
@@ -627,6 +708,26 @@ ul, ol { list-style: none }
 .anomaly-icon--spike   { background: var(--rose-light); color: var(--rose) }
 .anomaly-icon--outlier { background: var(--amber-light); color: var(--amber) }
 .anomaly-icon--new     { background: rgba(43,108,176,0.1); color: #2B6CB0 }
+
+
+
+/* ================================================================
+   FINANCIAL RESILIENCE
+   ================================================================ */
+
+.resilience-stats {
+  display: flex; gap: var(--sp-6); margin-top: var(--sp-4);
+}
+.resilience-stat { display: flex; flex-direction: column; gap: 2px }
+
+.resilience-chart { margin: var(--sp-5) 0 0 }
+
+.resilience-row {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--surface-alt);
+}
+.resilience-row:last-child { border-bottom: none }
 
 
 
@@ -836,10 +937,10 @@ ul, ol { list-style: none }
    ================================================================ */
 
 .footer {
-  padding: var(--sp-4) 0;
+  padding: var(--sp-8) 0 var(--sp-6);
   display: flex; justify-content: space-between; align-items: center;
   border-top: 1px solid var(--border);
-  margin-top: var(--sp-4);
+  margin-top: var(--sp-8);
 }
 
 
@@ -899,6 +1000,7 @@ ul, ol { list-style: none }
 @media (max-width: 1100px) {
   .metrics-row-equal { grid-template-columns: 1fr 1fr }
   .main-grid-wide    { grid-template-columns: 1fr }
+  .bento-row--wide   { grid-template-columns: 1fr 1fr }
 }
 
 @media (max-width: 1024px) {
@@ -908,6 +1010,8 @@ ul, ol { list-style: none }
 @media (max-width: 768px) {
   .header     { flex-wrap: wrap; gap: var(--sp-3) }
   .split-grid { grid-template-columns: 1fr }
+  .bento-row--wide,
+  .bento-row--even { grid-template-columns: 1fr }
   .hide-mobile { display: none !important }
 
   .split-grid [style*="border-right"] {
@@ -920,11 +1024,18 @@ ul, ol { list-style: none }
   .split-grid [style*="padding-left:20px"] {
     padding-left: 0 !important;
   }
+
+  .dashboard-sections .card:hover {
+    transform: none;
+  }
 }
 
 @media (max-width: 640px) {
   .shell             { padding: 0 var(--sp-4) }
   .metrics-row-equal { grid-template-columns: 1fr }
+  .dashboard-sections { gap: var(--sp-4) }
+  .tab-nav           { width: 100% }
+  .tab-nav__item     { flex: 1; text-align: center; padding: 8px 12px; font-size: var(--fs-sm) }
   .footer            { flex-direction: column; gap: var(--sp-2); text-align: center }
   .section-header    { flex-direction: column; gap: var(--sp-2) }
 }

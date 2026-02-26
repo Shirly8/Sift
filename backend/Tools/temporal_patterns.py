@@ -34,6 +34,20 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
     if len(income_dates) < 3:
         return {"payday_detected": False, "reason": f"Only {len(income_dates)} income deposits found — need 3+"}
 
+    # detect pay frequency: monthly (~30 day gaps) vs biweekly (~14 day gaps)
+    income_gaps = income_dates.diff().dt.days.dropna()
+    avg_income_gap = income_gaps.mean() if len(income_gaps) > 0 else 30
+
+    if 10 <= avg_income_gap <= 18:
+        pay_frequency = "biweekly"
+        # for biweekly: measure spending in first 5 days after each paycheck
+        window_days = 5
+        cycle_days  = 14
+    else:
+        pay_frequency = "monthly"
+        window_days = 7
+        cycle_days  = 30
+
 
     # spending = everything that's NOT income/transfer
     if "category" in df.columns:
@@ -44,28 +58,31 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
     spend_df = pd.DataFrame({"date": dates[spend_mask], "amount": amounts[spend_mask]})
 
 
-    # for each payday, how much was spent in first 7 days vs rest of month?
-    first_week_pcts = []
+    # for each payday, how much was spent in first N days vs rest of cycle?
+    first_window_pcts = []
 
     for pay_date in income_dates:
 
-        month_start = pay_date
-        month_end   = pay_date + pd.Timedelta(days=30)
-        first_week  = pay_date + pd.Timedelta(days=7)
+        cycle_start = pay_date
+        cycle_end   = pay_date + pd.Timedelta(days=cycle_days)
+        window_end  = pay_date + pd.Timedelta(days=window_days)
 
-        month_spend = spend_df[(spend_df["date"] >= month_start) & (spend_df["date"] < month_end)]
-        week_spend  = spend_df[(spend_df["date"] >= month_start) & (spend_df["date"] < first_week)]
+        cycle_spend  = spend_df[(spend_df["date"] >= cycle_start) & (spend_df["date"] < cycle_end)]
+        window_spend = spend_df[(spend_df["date"] >= cycle_start) & (spend_df["date"] < window_end)]
 
-        if month_spend["amount"].sum() > 0:
-            pct = week_spend["amount"].sum() / month_spend["amount"].sum()
-            first_week_pcts.append(pct)
+        if cycle_spend["amount"].sum() > 0:
+            pct = window_spend["amount"].sum() / cycle_spend["amount"].sum()
+            first_window_pcts.append(pct)
 
-    if len(first_week_pcts) < 3:
+    if len(first_window_pcts) < 3:
         return {"payday_detected": False, "reason": "Not enough payday cycles to analyze"}
 
 
-    avg_pct     = np.mean(first_week_pcts)
-    consistency = sum(1 for p in first_week_pcts if p > 0.30) / len(first_week_pcts)
+    avg_pct     = np.mean(first_window_pcts)
+    # threshold scales with window: 30% of a 30-day cycle in 7 days is high,
+    # 30% of a 14-day cycle in 5 days is expected — adjust threshold
+    threshold   = 0.25 if pay_frequency == "biweekly" else 0.30
+    consistency = sum(1 for p in first_window_pcts if p > threshold) / len(first_window_pcts)
 
     # payday day of month — most common
     payday_days = income_dates.dt.day.tolist()
@@ -77,9 +94,10 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
     return {
         "payday_detected":              True,
         "payday_day_of_month":          payday_day,
+        "pay_frequency":                pay_frequency,
         "spending_in_first_7_days_pct": round(avg_pct * 100, 1),
         "pattern_consistency":          round(consistency, 2),
-        "cycles_analyzed":              len(first_week_pcts),
+        "cycles_analyzed":              len(first_window_pcts),
         "confidence":                   round(min(consistency, 0.95), 2),
     }
 
@@ -115,11 +133,13 @@ def detect_weekly_pattern(df: pd.DataFrame) -> dict:
     # how much more on weekends?
     multiple = round(weekend_avg / weekday_avg, 2) if weekday_avg > 0 else 1.0
 
-    # pattern strength: how much variance is explained by day-of-week
-    overall_avg = amounts.mean()
-    ss_between  = sum(daily.groupby("day")["amount"].count() * (avg - overall_avg) ** 2)
-    ss_total    = ((amounts - overall_avg) ** 2).sum()
-    strength    = round(float(ss_between / ss_total), 2) if ss_total > 0 else 0.0
+    # pattern strength: eta-squared (SS_between / SS_total)
+    # computed properly by assigning each transaction its group mean
+    overall_avg  = amounts.mean()
+    group_means  = daily["day"].map(avg)
+    ss_between   = float(((group_means - overall_avg) ** 2).sum())
+    ss_total     = float(((amounts - overall_avg) ** 2).sum())
+    strength     = round(ss_between / ss_total, 2) if ss_total > 0 else 0.0
 
     return {
         "weekend_spending_multiple": multiple,
