@@ -16,8 +16,7 @@ import FinancialResilience from './FinancialResilience';
 import UploadModal from './UploadModal';
 import Toast from './Toast';
 import {
-  buildSpendingBars, buildTrendData, buildPatternCards,
-  buildSubscriptions, buildHabitsData, buildInsights,
+  buildSpendingBars, buildTrendData, buildHabitsData, buildInsights,
   buildAnomalies, buildResilience,
 } from './transformers';
 
@@ -165,11 +164,13 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
   // TrendChart: build from monthly data
   const trendData = buildTrendData(results, profile);
 
-  // PatternCards: build from correlation engine + temporal context
-  const patternData = buildPatternCards(results);
+  // PatternCards: undefined = tool skipped; [] = ran but no significant correlations found
+  const patternData = 'correlation_engine' in results
+    ? results.correlation_engine.slice(0, 4)
+    : undefined;
 
-  // Subscriptions: build from subscription_hunter results
-  const subscriptionData = buildSubscriptions(results);
+  // Subscriptions: backend already joined price_creep + overlaps onto each entry
+  const subscriptionData = results.subscription_hunter?.recurring?.length ? results.subscription_hunter.recurring : undefined;
 
   // SpendingHabits: build from temporal_patterns results
   const habitsData = buildHabitsData(results);

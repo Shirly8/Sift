@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useMemo } from 'react';
+import { getCategoryColor } from './transformers';
 
 
 export default function Subscriptions({ subscriptions }) {
@@ -19,7 +20,7 @@ export default function Subscriptions({ subscriptions }) {
   }, [filter, subscriptions]);
 
   const totalMonthly = filtered.reduce((a, s) => a + s.amount, 0);
-  const totalAnnual = filtered.reduce((a, s) => a + (s.annualCost || s.amount * 12), 0);
+  const totalAnnual = filtered.reduce((a, s) => a + (s.annual_cost || s.amount * 12), 0);
 
 
   // mini sparkline from price history
@@ -52,44 +53,47 @@ export default function Subscriptions({ subscriptions }) {
         </div>
       </div>
 
-      {filtered.map(s => (
-        <div key={s.name} className="sub-row">
-          <div className="flex items-center gap-3">
-            <div className="sub-icon" style={{ background: s.color }}>{s.name.charAt(0)}</div>
-            <div>
-              <div className="text-md fw-600">{s.name}</div>
-              <div className="text-xs ink-muted">
-                ${(s.annualCost || s.amount * 12).toFixed(0)}/yr
-                {s.frequency && s.frequency !== 'monthly' && (
-                  <> &middot; {s.frequency}</>
-                )}
-                {s.creep && (
-                  <> &middot; <span style={{ color: 'var(--terra)' }}>
-                    +{s.creepPct}%
-                    {s.creepFrom != null && s.creepTo != null && (
-                      <> (${s.creepFrom.toFixed(2)} &rarr; ${s.creepTo.toFixed(2)})</>
-                    )}
-                  </span></>
-                )}
-                {s.overlap && (
-                  <> &middot; <span style={{ color: 'var(--blue)' }}>
-                    {s.overlap} ({s.overlapCount} subs)
-                  </span></>
-                )}
+      {filtered.map((s, i) => {
+        const color = getCategoryColor(s.category, i);
+        return (
+          <div key={s.merchant} className="sub-row">
+            <div className="flex items-center gap-3">
+              <div className="sub-icon" style={{ background: color }}>{s.merchant.charAt(0)}</div>
+              <div>
+                <div className="text-md fw-600">{s.merchant}</div>
+                <div className="text-xs ink-muted">
+                  ${(s.annual_cost || s.amount * 12).toFixed(0)}/yr
+                  {s.frequency && s.frequency !== 'monthly' && (
+                    <> &middot; {s.frequency}</>
+                  )}
+                  {s.creep && (
+                    <> &middot; <span style={{ color: 'var(--terra)' }}>
+                      +{s.creep_pct}%
+                      {s.creep_from != null && s.creep_to != null && (
+                        <> (${s.creep_from.toFixed(2)} &rarr; ${s.creep_to.toFixed(2)})</>
+                      )}
+                    </span></>
+                  )}
+                  {s.overlap && (
+                    <> &middot; <span style={{ color: 'var(--blue)' }}>
+                      {s.overlap} ({s.overlap_count} subs)
+                    </span></>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
 
-          <div className="flex items-center gap-3">
-            {s.history && s.history.length >= 2 && (
-              <svg width="60" height="20" style={{ opacity: 0.5 }}>
-                <polyline points={sparkPoints(s.history)} fill="none" stroke={s.color} strokeWidth="1.5" strokeLinecap="round" />
-              </svg>
-            )}
-            <div className="text-md fw-700">${s.amount.toFixed(2)}</div>
+            <div className="flex items-center gap-3">
+              {s.history && s.history.length >= 2 && (
+                <svg width="60" height="20" style={{ opacity: 0.5 }}>
+                  <polyline points={sparkPoints(s.history)} fill="none" stroke={color} strokeWidth="1.5" strokeLinecap="round" />
+                </svg>
+              )}
+              <div className="text-md fw-700">${s.amount.toFixed(2)}</div>
+            </div>
           </div>
-        </div>
-      ))}
+        );
+      })}
 
     </div>
   );

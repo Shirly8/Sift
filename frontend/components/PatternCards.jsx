@@ -38,7 +38,18 @@ export default function PatternCards({ patterns }) {
   }, [patterns]);
 
 
-  if (!patterns || !patterns.length) return null;
+  if (patterns === undefined || patterns === null) return null;
+
+  if (!patterns.length) return (
+    <div className="card card--static pc-section">
+      <div className="pc-header">
+        <div>
+          <h3 className="heading-card">Patterns We Found</h3>
+          <p className="text-sm ink-muted">No significant spending correlations detected yet — a few more months of data will reveal patterns.</p>
+        </div>
+      </div>
+    </div>
+  );
 
 
   return (
@@ -79,13 +90,13 @@ export default function PatternCards({ patterns }) {
 
               {/* Category pair with connector */}
               <div className="pc__cats">
-                <span>{p.catA}</span>
+                <span>{p.category_a}</span>
                 <div className="pc__connector">
                   <svg width="8" height="8" viewBox="0 0 8 8" fill="none">
                     <path d="M1.5 4h5M4.8 2l2 2-2 2" stroke="var(--ink-muted)" strokeWidth="1.1" strokeLinecap="round" strokeLinejoin="round"/>
                   </svg>
                 </div>
-                <span>{p.catB}</span>
+                <span>{p.category_b}</span>
               </div>
 
               <p><SafeText text={p.desc} /></p>

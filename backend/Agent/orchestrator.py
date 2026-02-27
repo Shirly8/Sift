@@ -19,14 +19,14 @@ from Tools.anomaly_detector       import detect_transaction_outliers, detect_spe
 from Tools.subscription_hunter    import detect_recurring_charges, detect_price_creep, detect_subscription_overlap
 from Tools.behavioral_correlation import calculate_category_correlations
 from Tools.spending_impact        import fit_impact_model
-from Tools.simulator             import stress_test as run_stress_test, calculate_runway
+from Tools.financial_resilience   import run_financial_resilience
 
 
 # tool requirements — hard constraints
 TOOL_REQUIREMENTS = {
     "temporal_patterns":      {"min_days": 90,  "min_categories": 0},
     "anomaly_detection":      {"min_days": 0,   "min_categories": 0},
-    "subscription_hunter":    {"min_transactions": 100, "min_days": 0, "min_categories": 0},
+    "subscription_hunter":    {"min_transactions": 50, "min_days": 0, "min_categories": 0},
     "correlation_engine":     {"min_days": 90,  "min_categories": 3},
     "spending_impact":        {"min_days": 180, "min_categories": 5},
     "financial_resilience":   {"min_days": 90,  "min_categories": 3},
@@ -84,8 +84,7 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
 
     # category with highest month-to-month dollar range (ignoring income/transfer)
     if "category" in df_spend.columns and months_count >= 3:
-        expense_only = df_spend[~df_spend["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
-        cat_monthly = expense_only.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
+        cat_monthly = df_spend.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
         if len(cat_monthly.columns) > 0:
             cat_range = cat_monthly.max() - cat_monthly.min()
             top_cat   = cat_range.idxmax()
@@ -291,10 +290,7 @@ def _run_tool(name: str, df: pd.DataFrame) -> tuple:
         return name, fit_impact_model(df)
 
     elif name == "financial_resilience":
-        return name, {
-            "stress_test": run_stress_test(df, "job_loss"),
-            "runway":      calculate_runway(df),
-        }
+        return name, run_financial_resilience(df)
 
     return name, {}
 
@@ -349,6 +345,10 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dic
 
     elapsed = round(time.time() - start_time, 2)
 
+    # enrich results so the frontend can render without processing
+    _enrich_correlations(results)
+    _enrich_subscriptions(results)
+
     print(f"\nAnalysis complete: {len(tools_run)} tools run, {len(tools_skipped)} skipped ({elapsed}s)")
 
     return {
@@ -357,6 +357,84 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dic
         "results":       results,
         "execution_time": elapsed,
     }
+
+
+def _enrich_correlations(results: dict) -> None:
+    """
+    Add display fields to each correlation so the frontend just renders.
+    Needs temporal data if available (for timing copy).
+    Mutates results in place.
+    """
+    correlations = results.get("correlation_engine")
+    if not correlations or not isinstance(correlations, list):
+        return
+
+    temporal = results.get("temporal_patterns", {})
+    payday   = temporal.get("payday", {})
+    weekly   = temporal.get("weekly", {})
+
+    payday_cats  = {"dining", "shopping", "personal care", "delivery", "entertainment"}
+    weekend_cats = {"dining", "entertainment", "shopping", "delivery"}
+
+    for corr in correlations:
+        a        = corr["category_a"]
+        b        = corr["category_b"]
+        positive = corr["correlation"] > 0
+        adverb   = "strongly" if corr["confidence"] == "HIGH" else "often"
+
+        corr["direction"] = "correlated" if positive else "inverse"
+        corr["strength"]  = "Strong pattern" if corr["confidence"] == "HIGH" else "Likely pattern"
+        corr["theme"]     = "pc--strong"   if corr["confidence"] == "HIGH" else "pc--moderate"
+
+        if positive:
+            corr["desc"] = f"When **{a}** rises, **{b}** tends to follow — they {adverb} move in lockstep."
+        else:
+            corr["desc"] = f"When **{a}** goes up, **{b}** tends to drop — they {adverb} move in opposite directions."
+
+        timing = ""
+        cats   = {a.lower(), b.lower()}
+        if payday.get("payday_detected") and cats & payday_cats:
+            timing = "Peaks week 1 after payday"
+            corr["desc"] += " Both tend to jump in the first week after payday."
+        elif weekly.get("weekend_spending_multiple", 1) > 1.3 and cats & weekend_cats:
+            timing = "Mostly on weekends"
+            corr["desc"] += " Both tend to be higher on weekends."
+
+        corr["timing"] = timing
+
+
+def _enrich_subscriptions(results: dict) -> None:
+    """
+    Join price_creep and overlaps onto each recurring entry so the frontend
+    receives a flat list and does no merging.
+    Mutates results in place.
+    """
+    subs = results.get("subscription_hunter")
+    if not subs or not isinstance(subs, dict):
+        return
+
+    price_creep_map = {
+        pc["merchant"]: pc
+        for pc in subs.get("price_creep", [])
+        if pc.get("price_creep_detected")
+    }
+
+    overlap_map = {
+        o["category"]: o
+        for o in subs.get("overlaps", [])
+    }
+
+    for r in subs.get("recurring", []):
+        creep = price_creep_map.get(r["merchant"])
+        r["creep"]       = bool(creep)
+        r["creep_pct"]   = round(creep["total_increase_pct"]) if creep else 0
+        r["creep_from"]  = creep.get("original_price")        if creep else None
+        r["creep_to"]    = creep.get("current_price")         if creep else None
+        r["history"]     = [p["amount"] for p in creep["price_history"]] if creep and creep.get("price_history") else [r["amount"]]
+
+        overlap = overlap_map.get(r["category"])
+        r["overlap"]       = r["category"] if overlap else None
+        r["overlap_count"] = overlap["count"] if overlap else 0
 
 
 

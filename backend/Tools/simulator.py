@@ -236,21 +236,6 @@ def stress_test(df: pd.DataFrame, scenario: str = "job_loss") -> dict:
         }
 
 
-    elif scenario == "expense_increase":
-
-        # housing +20% — biggest essential that could realistically spike
-        housing = distributions.get("Rent & Housing", {}).get("mean", 0.0)
-        impact  = housing * 0.20
-
-        return {
-            "scenario":        "expense_increase",
-            "category":        "Rent & Housing",
-            "current_monthly": round(housing, 2),
-            "monthly_impact":  round(impact, 2),
-            "annual_impact":   round(impact * 12, 2),
-        }
-
-
     return {"error": f"Unknown scenario: {scenario}"}
 
 

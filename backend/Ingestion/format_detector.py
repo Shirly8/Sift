@@ -161,13 +161,8 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
     # TD has separate debit/credit columns — combine them
 
     amount_col = mapping["amount"]
-    # fallback: RBC exports sometimes have "amount" instead of "amount ($)"
     if amount_col and amount_col not in df.columns:
-        if format_type == "rbc" and "amount" in df.columns:
-            amount_col = "amount"
-            print(f"RBC fallback: using 'amount' column instead of '{mapping['amount']}'")
-        else:
-            amount_col = None
+        amount_col = None
     if amount_col and amount_col in df.columns:
         amount_series = pd.to_numeric(_clean_amount(df[amount_col]), errors="coerce")
 

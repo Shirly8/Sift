@@ -54,8 +54,9 @@ TOOLS:
 7. simulate_future — Project spending forward with Monte Carlo simulation. For questions like "what will my spending look like?", "can I afford X?", "what happens in 6 months?"
    params: {"months": 12, "scenario": "job_loss"}  (both optional, scenario: job_loss/expense_increase/subscription_purge)
 
-8. stress_test — Financial resilience scenarios. For questions about job loss, emergency fund, runway, "what if I lose my job?", "how long can I survive?", "what if rent goes up?"
-   params: {"scenario": "job_loss"}  (job_loss/expense_increase/subscription_purge)
+8. stress_test — Financial resilience scenarios. For questions about job loss, emergency fund, runway, "what if I lose my job?", "how long can I survive?"
+   params: {"scenario": "job_loss"}  (job_loss/subscription_purge)
+   For "what if rent/expenses go up?" questions, use simulate_future with expense_increase scenario instead.
 
 Return JSON only: {"tool": "tool_name", "params": {...}}
 If the question is broad or general, use multi_analyze."""

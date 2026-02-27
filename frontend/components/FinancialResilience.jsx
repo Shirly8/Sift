@@ -92,6 +92,7 @@ export default function FinancialResilience({ data }) {
                 <> We didn&rsquo;t detect income in your data &mdash; upload
                 at least 3 months of deposits so Sift can calculate the full picture.</>
               )}
+              {' '}<span style={{ opacity: 0.6, fontSize: '0.85em' }}>Estimated from the income and spending in this CSV only &mdash; savings held in other accounts are not included.</span>
             </>
           ) : (
             <>You&rsquo;re earning more than you spend. Your savings grow each
