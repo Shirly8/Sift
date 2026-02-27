@@ -9,7 +9,6 @@ Find transaction outliers, category spending spikes, and new merchants
 """
 
 import pandas as pd
-import numpy as np
 
 
 
@@ -98,7 +97,7 @@ def detect_spending_spikes(df: pd.DataFrame) -> list:
     if "category" not in df.columns:
         return results
 
-    dates = pd.to_datetime(df["date"])
+    dates = df["date"]
 
     # need at least 2 months
     span_days = (dates.max() - dates.min()).days
@@ -114,7 +113,7 @@ def detect_spending_spikes(df: pd.DataFrame) -> list:
         if category and category.lower() in ["income", "transfer"]:
             continue
 
-        group_dates = pd.to_datetime(group["date"])
+        group_dates = group["date"]
         monthly     = group.groupby(group_dates.dt.to_period("M"))["amount"].sum()
 
         if len(monthly) < 2:
@@ -160,7 +159,7 @@ def detect_new_merchants(df: pd.DataFrame, lookback_days: int = 30) -> list:
     """
 
     results = []
-    dates   = pd.to_datetime(df["date"])
+    dates   = df["date"]
     cutoff  = dates.max() - pd.Timedelta(days=lookback_days)
 
     # overall median for "high-value" threshold

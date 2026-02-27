@@ -14,7 +14,11 @@ export default function UploadModal({ open, onClose, onComplete }) {
 
   // reset when opened
   useEffect(() => {
-    if (open) setState('drop');
+    if (open) {
+      setState('drop');
+      setUploadSummary(null);
+      setSessionId(null);
+    }
   }, [open]);
 
 
@@ -82,9 +86,9 @@ export default function UploadModal({ open, onClose, onComplete }) {
         {/* STATE 1 — drop zone */}
         {state === 'drop' && (
           <div>
-            <h2 className="heading-section" style={{ marginBottom: 6 }}>Upload Your Transactions</h2>
-            <p className="text-sm ink-muted" style={{ marginBottom: 20 }}>
-              Drop a CSV from your bank. We'll figure out the format automatically.
+            <h2 className="heading-section upload-heading">Upload Your Transactions</h2>
+            <p className="upload-desc">
+              Drop a CSV from your bank. We&rsquo;ll figure out the format automatically.
             </p>
 
             <div
@@ -94,16 +98,12 @@ export default function UploadModal({ open, onClose, onComplete }) {
               onDrop={e => { e.preventDefault(); setDragover(false); handleUpload(e.dataTransfer.files[0]) }}
               onClick={() => fileInputRef.current?.click()}
             >
-              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--terra)" strokeWidth="1.5" strokeLinecap="round" style={{ margin: '0 auto 14px' }}>
+              <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--terra)" strokeWidth="1.5" strokeLinecap="round">
                 <path d="M12 5v14M5 12l7-7 7 7" />
               </svg>
-              <div className="fw-600 text-md" style={{ marginBottom: 4 }}>Drop CSV file here</div>
-              <div className="text-sm ink-muted">
-                or <span style={{ color: 'var(--terra)', cursor: 'pointer', fontWeight: 600 }}>browse files</span>
-              </div>
-              <div className="text-xs ink-faint" style={{ marginTop: 12 }}>
-                Works with Wealthsimple, RBC, TD, Scotiabank, or any CSV
-              </div>
+              <h3>Drop CSV file here</h3>
+              <p>or <a onClick={e => e.stopPropagation()}>browse files</a></p>
+              <footer>Works with Wealthsimple, RBC, TD, Scotiabank, or any CSV</footer>
             </div>
 
             <input
@@ -119,41 +119,35 @@ export default function UploadModal({ open, onClose, onComplete }) {
 
         {/* STATE 2 — processing (sub-second, just a spinner) */}
         {state === 'processing' && (
-          <div style={{ textAlign: 'center', padding: '20px 0' }}>
-            <div className="spinner" style={{ width: 40, height: 40, borderWidth: '3px', margin: '0 auto 16px' }} />
-            <h2 className="heading-section" style={{ marginBottom: 6 }}>Reading your transactions...</h2>
-            <p className="text-sm ink-muted">This should only take a moment</p>
+          <div className="upload-processing">
+            <div className="spinner spinner--lg" />
+            <h2 className="heading-section upload-heading">Reading your transactions...</h2>
+            <p className="upload-desc">This should only take a moment</p>
           </div>
         )}
 
 
         {/* STATE 3 — ready */}
         {state === 'ready' && uploadSummary && (
-          <div style={{ textAlign: 'center' }}>
+          <div className="upload-ready">
 
             {/* success icon */}
-            <div style={{
-              width: 56, height: 56, borderRadius: '50%',
-              background: 'var(--sage-light)',
-              display: 'flex', alignItems: 'center', justifyContent: 'center',
-              margin: '0 auto 16px',
-            }}>
+            <div className="upload-success-icon">
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="var(--sage-dark)" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M5 12l5 5L20 7" />
               </svg>
             </div>
 
-            <h2 className="heading-section" style={{ marginBottom: 6 }}>Ready to go</h2>
-            <p className="text-sm ink-muted" style={{ marginBottom: 6 }}>
+            <h2 className="heading-section upload-heading">Ready to go</h2>
+            <p className="upload-summary">
               {uploadSummary.total} transactions &middot; {uploadSummary.date_range?.days} days of history
             </p>
-            <p className="text-sm ink-muted" style={{ marginBottom: 20 }}>
+            <p className="upload-desc">
               {uploadSummary.coverage_pct}% auto-categorized &middot; {uploadSummary.needs_llm} need categorization
             </p>
 
             <button
-              className="btn btn--primary"
-              style={{ width: '100%', justifyContent: 'center' }}
+              className="btn btn--primary btn--block"
               onClick={() => onComplete && onComplete(sessionId, null)}
             >
               Analyze My Spending

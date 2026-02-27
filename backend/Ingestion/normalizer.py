@@ -32,6 +32,7 @@ ONLINE_PATTERN = re.compile(r"[*\s]+[A-Z0-9]*\d[A-Z0-9]{4,}$")
 
 def clean_merchant_name(merchant: str) -> str:
     """
+    remove prefix and location
     ("DEBIT CARD PURCHASE - STARBUCKS #1234 ON KING ST") -> "STARBUCKS"
     """
 
@@ -62,24 +63,19 @@ def deduplicate_transactions(df: pd.DataFrame) -> pd.DataFrame:
     legitimate repeat transactions (e.g. two coffees at Starbucks in one day).
 
     Strategy: allow up to 2 transactions with the same (date, amount, merchant).
-    Only the 3rd+ identical row is considered a data import duplicate.
     """
 
     before = len(df)
 
     # count occurrences within each (date, amount, merchant) group
-    # keep the first 2 — two identical purchases in a day is plausible,
     # three is almost certainly a CSV import artifact
+    
     df["_dup_rank"] = df.groupby(["date", "amount", "merchant"]).cumcount()
     df = df[df["_dup_rank"] < 2].drop(columns=["_dup_rank"])
 
     removed = before - len(df)
     if removed > 0:
-        dup_pct = removed / before
-        if dup_pct > 0.01:
-            print(f"Warning: {removed} duplicates removed ({dup_pct:.1%} of total)")
-        else:
-            print(f"Removed {removed} duplicate transactions")
+        print(f"Removed {removed} duplicate transactions")
 
     return df.reset_index(drop=True)
 
@@ -99,52 +95,8 @@ def validate_date_range(df: pd.DataFrame) -> tuple:
     if span_days < 7:
         print(f"Warning: Only {span_days} days of data — analysis may be limited")
 
-    # check for missing months (gaps > 30 days)
-    monthly         = dates.dt.to_period("M").nunique()
-    expected_months = max(1, span_days // 30)
-    if monthly < expected_months * 0.8:
-        print(f"Warning: Possible missing data — {monthly} months found, expected ~{expected_months}")
-
-
     print(f"Date range: {start_date.date()} → {end_date.date()} ({span_days} days)")
     return start_date, end_date
 
 
 
-####################################
-# STEP 4: DATA QUALITY SCORE
-####################################
-
-def calculate_data_quality_score(df: pd.DataFrame) -> float:
-
-    """
-    calculate_data_quality_score(df) -> 0.92 (merchant=100%, amount=98%, span=273d)
-    """
-
-    total = len(df)
-    if total == 0:
-        raise ValueError("No transactions found")
-
-    # merchant completeness
-    merchant_ok  = df["merchant"].notna() & (df["merchant"].str.strip() != "")
-    merchant_pct = merchant_ok.sum() / total
-
-
-    # amount completeness 
-    amount_ok  = df["amount"].notna() & (df["amount"] > 0)
-    amount_pct = amount_ok.sum() / total
-
-
-
-    # date span — 180 days = full score (0.3 weight)
-    dates     = pd.to_datetime(df["date"])
-    span_days = (dates.max() - dates.min()).days
-    date_pct  = min(span_days / 180, 1.0)
-
-    score = round((merchant_pct * 0.3) + (amount_pct * 0.4) + (date_pct * 0.3), 4)
-
-    if score < 0.5:
-        raise ValueError(f"Data quality too low ({score:.2f}) — check your CSV")
-
-    print(f"Data quality score: {score:.2f} (merchant={merchant_pct:.0%}, amount={amount_pct:.0%}, span={span_days}d)")
-    return score

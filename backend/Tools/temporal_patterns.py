@@ -19,11 +19,11 @@ import numpy as np
 
 def detect_payday_pattern(df: pd.DataFrame) -> dict:
 
-    dates   = pd.to_datetime(df["date"])
+    dates   = df["date"]
     amounts = df["amount"].astype(float)
 
 
-    # find income deposits — only reliable with category data
+    # find the income transaction
     if "category" in df.columns:
         income_mask = df["category"].fillna("").str.lower() == "income"
     else:
@@ -34,7 +34,7 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
     if len(income_dates) < 3:
         return {"payday_detected": False, "reason": f"Only {len(income_dates)} income deposits found — need 3+"}
 
-    # detect pay frequency: monthly (~30 day gaps) vs biweekly (~14 day gaps)
+    # pay frequency: monthly (~30 day gaps) vs biweekly (~14 day gaps)
     income_gaps = income_dates.diff().dt.days.dropna()
     avg_income_gap = income_gaps.mean() if len(income_gaps) > 0 else 30
 
@@ -79,6 +79,8 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
 
 
     avg_pct     = np.mean(first_window_pcts)
+
+    
     # threshold scales with window: 30% of a 30-day cycle in 7 days is high,
     # 30% of a 14-day cycle in 5 days is expected — adjust threshold
     threshold   = 0.25 if pay_frequency == "biweekly" else 0.30
@@ -109,7 +111,7 @@ def detect_payday_pattern(df: pd.DataFrame) -> dict:
 
 def detect_weekly_pattern(df: pd.DataFrame) -> dict:
 
-    dates   = pd.to_datetime(df["date"])
+    dates   = df["date"]
     amounts = df["amount"].astype(float)
 
     # filter to spending only
@@ -158,7 +160,7 @@ def detect_weekly_pattern(df: pd.DataFrame) -> dict:
 
 def detect_seasonal_pattern(df: pd.DataFrame) -> dict:
 
-    dates   = pd.to_datetime(df["date"])
+    dates   = df["date"]
     amounts = df["amount"].astype(float)
 
     span_days = (dates.max() - dates.min()).days

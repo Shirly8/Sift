@@ -1,29 +1,25 @@
 """
-Monte Carlo spending projections using actual spending patterns
+Monte Carlo financial projections and stress tests
 
-Projects spending forward by sampling from per-category distributions
-fitted to historical data. Fixed costs (subscriptions) are deterministic;
-variable categories are stochastic (Normal(mean, std)).
+  run_projection(df, months=12, scenario=None)
+  -> {"monthly": [{"month": 1, "spend_p50": 2100, "net_p50": 420, ...}], "baseline": {...}}
 
-  run_projection(df, months=12, n_sims=1000)
-  -> {"monthly_net": {10: [...], 50: [...], 90: [...]}, "cumulative_net": {...}, ...}
-
-  stress_test(df, scenario="job_loss")
-  -> {"months_of_runway": 8.3, "minimum_monthly_budget": 1200, "categories_to_cut": [...]}
+  stress_test(df, "job_loss")
+  -> {"months_of_runway": 8.3, "runway_ci": {"p10": 6.1, "p90": 11.2}, "categories_to_cut": [...]}
 
   calculate_runway(df)
-  -> {"months_of_runway": 14.2, "confidence_interval": [11.5, 18.1]}
+  -> {"months_of_runway": 14.2, "monthly_burn": 3800.0, "estimated_savings": 31540.0}
 
-No LLM calls. Pure numpy computation.
+Zero LLM calls. Pure numpy.
 """
 
-import pandas as pd
 import numpy as np
+import pandas as pd
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
 
-from Tools.subscription_hunter import detect_recurring_charges
+
+N_SIMS = 1000
 
 
 
@@ -31,12 +27,10 @@ from Tools.subscription_hunter import detect_recurring_charges
 # STEP 1: BUILD DISTRIBUTIONS
 ####################################
 
-def _build_category_distributions(df: pd.DataFrame, recurring: list) -> tuple:
+def _build_distributions(df: pd.DataFrame) -> dict:
     """
-    Returns (variable_dists, fixed_monthly_total).
-
-    variable_dists: {category: {"mean": float, "std": float}}
-    fixed_monthly_total: float (sum of all monthly recurring charges)
+    Per-category Normal(mean, std) from monthly spending history.
+    Returns {category: {"mean": float, "std": float}}
     """
 
     spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
@@ -47,389 +41,260 @@ def _build_category_distributions(df: pd.DataFrame, recurring: list) -> tuple:
         aggfunc="sum", fill_value=0,
     )
 
-    # fixed cost total from recurring charges
-    fixed_monthly = sum(
-        r["amount"] for r in recurring
-        if r["frequency"] == "monthly"
-    )
-
-    # map recurring merchants -> categories to subtract from variable
-    recurring_by_cat = {}
-    for r in recurring:
-        if r["frequency"] == "monthly":
-            cat = r.get("category", "Unknown")
-            recurring_by_cat[cat] = recurring_by_cat.get(cat, 0) + r["amount"]
-
-    # build distributions, subtracting fixed costs from their categories
-    means = pivot.mean()
-    stds  = pivot.std()
-
-    variable_dists = {}
+    distributions = {}
     for cat in pivot.columns:
-        if cat.lower() in ["income", "transfer"]:
-            continue
+        mean = float(pivot[cat].mean())
+        std  = float(pivot[cat].std()) if len(pivot) > 1 else mean * 0.15
+        if mean > 0:
+            distributions[cat] = {"mean": mean, "std": max(std, 1.0)}
 
-        adj_mean = float(means[cat]) - recurring_by_cat.get(cat, 0)
-        adj_mean = max(0, adj_mean)
-
-        # if std is 0 or too few months, use 10% of mean as synthetic variance
-        cat_std = float(stds[cat]) if len(pivot) >= 3 and stds[cat] > 0 else adj_mean * 0.10
-
-        variable_dists[cat] = {"mean": adj_mean, "std": cat_std}
-
-    return variable_dists, fixed_monthly
+    return distributions
 
 
-def _get_monthly_income(df: pd.DataFrame) -> float:
-    """Average monthly income from transaction data."""
 
-    if "category" not in df.columns:
-        return 0
+####################################
+# STEP 2: MONTE CARLO CORE
+####################################
 
-    income_df = df[df["category"].fillna("").str.lower() == "income"].copy()
-    if income_df.empty:
-        return 0
+def _simulate(distributions: dict, months: int) -> np.ndarray:
+    """
+    Sample monthly spending from per-category distributions.
+    Returns (N_SIMS, months) array of total monthly spending.
+    """
 
+    totals = np.zeros((N_SIMS, months))
+
+    for params in distributions.values():
+        samples = np.random.normal(params["mean"], params["std"], (N_SIMS, months))
+        totals += np.clip(samples, 0, None)
+
+    return totals
+
+
+
+####################################
+# STEP 3: RUN PROJECTION
+####################################
+
+def run_projection(df: pd.DataFrame, months: int = 12, scenario: dict = None) -> dict:
+    """
+    Project spending forward with Monte Carlo.
+
+      run_projection(df, months=6)
+      -> {"monthly": [{"month": 1, "spend_p50": 2100, "net_p50": 420}], "baseline": {...}}
+
+    scenario: None | {"type": "job_loss"} | {"type": "expense_increase", "category": ..., "multiplier": ...} | {"type": "subscription_purge"}
+    """
+
+    distributions = _build_distributions(df)
+
+    if not distributions:
+        return {"error": "Not enough spending data"}
+
+    # monthly income average
+    income_mask = df["category"].fillna("").str.lower() == "income"
+    income_df   = df[income_mask].copy()
     income_df["month"] = pd.to_datetime(income_df["date"]).dt.to_period("M")
-    monthly = income_df.groupby("month")["amount"].sum()
+    monthly_income = float(income_df.groupby("month")["amount"].sum().mean()) if not income_df.empty else 0.0
 
-    return float(monthly.mean()) if len(monthly) > 0 else 0
-
-
-
-####################################
-# STEP 2: RUN PROJECTION
-####################################
-
-def run_projection(
-    df: pd.DataFrame,
-    months: int = 12,
-    n_sims: int = 1000,
-    scenario: dict = None,
-) -> dict:
-    """
-    Monte Carlo projection of spending over N months.
-
-      run_projection(df, months=12)
-      -> {"monthly_net": {10: [...], 50: [...]}, "cumulative_net": {...}, "baseline": {...}}
-
-    scenario format:
-      {"type": "job_loss"}
-      {"type": "expense_increase", "category": "Rent & Housing", "multiplier": 1.2}
-      {"type": "subscription_purge"}
-    """
-
-    recurring = detect_recurring_charges(df)
-    variable_dists, fixed_monthly = _build_category_distributions(df, recurring)
-    income = _get_monthly_income(df)
-
-    if not variable_dists:
-        return {"error": "Not enough spending data for projection"}
-
-    cat_names = list(variable_dists.keys())
-    n_cats    = len(cat_names)
-    cat_means = np.array([variable_dists[c]["mean"] for c in cat_names])
-    cat_stds  = np.array([variable_dists[c]["std"]  for c in cat_names])
-
-    # vectorized sampling: (n_sims, months, n_categories)
-    samples = np.random.normal(
-        loc=cat_means, scale=cat_stds,
-        size=(n_sims, months, n_cats),
-    )
-    samples = np.maximum(samples, 0)
-
-    # apply scenario modifiers
-    effective_income  = income
-    effective_fixed   = fixed_monthly
+    # copy distributions so we can modify without affecting caller
+    dists            = {k: dict(v) for k, v in distributions.items()}
+    effective_income = monthly_income
 
     if scenario:
-        if scenario.get("type") == "job_loss":
-            effective_income = 0
+        stype = scenario.get("type")
 
-        elif scenario.get("type") == "expense_increase":
-            target = scenario.get("category", "")
-            mult   = scenario.get("multiplier", 1.2)
-            for i, c in enumerate(cat_names):
-                if c.lower() == target.lower():
-                    samples[:, :, i] *= mult
+        if stype == "job_loss":
+            effective_income = 0.0
 
-        elif scenario.get("type") == "subscription_purge":
-            essential_cats = {"bills & utilities", "insurance", "rent & housing"}
-            purged = sum(
-                r["amount"] for r in recurring
-                if r["frequency"] == "monthly"
-                and r.get("category", "").lower() not in essential_cats
-            )
-            effective_fixed -= purged
+        elif stype == "expense_increase":
+            cat  = scenario.get("category", "")
+            mult = scenario.get("multiplier", 1.2)
+            if cat in dists:
+                dists[cat]["mean"] *= mult
 
-    # monthly spending per sim
-    monthly_variable = samples.sum(axis=2)
-    monthly_spending = monthly_variable + effective_fixed
+        elif stype == "subscription_purge":
+            dists = {k: v for k, v in dists.items() if k.lower() != "subscriptions"}
 
-    # net = income - spending
-    monthly_net = effective_income - monthly_spending
-    cumulative  = np.cumsum(monthly_net, axis=1)
+    totals = _simulate(dists, months)  # (N_SIMS, months)
+    nets   = effective_income - totals
 
-    # extract percentiles
-    pct_keys      = [10, 25, 50, 75, 90]
-    monthly_pct   = {p: np.percentile(monthly_net, p, axis=0).round(2).tolist() for p in pct_keys}
-    cumulative_pct = {p: np.percentile(cumulative, p, axis=0).round(2).tolist() for p in pct_keys}
+    monthly = []
+    for m in range(months):
+        monthly.append({
+            "month":     m + 1,
+            "spend_p10": round(float(np.percentile(totals[:, m], 10)), 2),
+            "spend_p50": round(float(np.percentile(totals[:, m], 50)), 2),
+            "spend_p90": round(float(np.percentile(totals[:, m], 90)), 2),
+            "net_p50":   round(float(np.percentile(nets[:, m], 50)), 2),
+        })
 
-    total_variable = float(cat_means.sum())
+    avg_spend   = float(np.mean(totals))
+    fixed_costs = distributions.get("Subscriptions", {}).get("mean", 0.0)
 
-    print(f"Projection: {months}mo, {n_sims} sims, {n_cats} categories, scenario={scenario}")
+    print(f"Projection: {months}mo, {N_SIMS} sims, scenario={scenario and scenario.get('type')}")
 
     return {
-        "monthly_net":    monthly_pct,
-        "cumulative_net": cumulative_pct,
+        "scenario": scenario,
+        "months":   months,
+        "monthly":  monthly,
         "baseline": {
-            "monthly_income":    round(income, 2),
-            "monthly_spending":  round(total_variable + fixed_monthly, 2),
-            "fixed_costs":       round(fixed_monthly, 2),
-            "variable_spending": round(total_variable, 2),
+            "monthly_income":   round(monthly_income, 2),
+            "monthly_spending": round(avg_spend, 2),
+            "fixed_costs":      round(fixed_costs, 2),
         },
-        "scenario_applied": scenario.get("type") if scenario else None,
-        "has_income":        income > 0,
-        "n_sims":            n_sims,
-        "months":            months,
     }
 
 
 
 ####################################
-# STEP 3: STRESS TEST
+# STEP 4: STRESS TEST
 ####################################
-
-ESSENTIAL_CATEGORIES = {"groceries", "grocery", "rent & housing", "rent", "mortgage",
-                        "healthcare", "medical", "insurance", "utilities",
-                        "bills & utilities", "childcare", "education"}
 
 def stress_test(df: pd.DataFrame, scenario: str = "job_loss") -> dict:
     """
-    Preset stress scenarios with actionable outputs.
+    Preset stress scenarios.
 
       stress_test(df, "job_loss")
-      -> {"months_of_runway": 8.3, "minimum_monthly_budget": 1200, "categories_to_cut": [...]}
+      -> {"months_of_runway": 8.3, "runway_ci": {"p10": 6.1, "p90": 11.2}, "categories_to_cut": [...]}
     """
 
-    valid_scenarios = {"job_loss", "expense_increase", "subscription_purge"}
-    if scenario not in valid_scenarios:
-        raise ValueError(f"Unknown scenario '{scenario}'. Must be one of: {valid_scenarios}")
+    distributions = _build_distributions(df)
+
+    if not distributions:
+        return {"error": "Not enough spending data"}
+
 
     if scenario == "job_loss":
-        return _stress_job_loss(df)
-    elif scenario == "expense_increase":
-        return _stress_expense_increase(df)
+
+        # estimated savings = what's been accumulated over the data period
+        income_mask = df["category"].fillna("").str.lower() == "income"
+        spend_mask  = ~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])
+
+        estimated_savings = max(0.0,
+            float(df[income_mask]["amount"].sum()) - float(df[spend_mask]["amount"].sum())
+        )
+
+        # MC: how many months until cumulative spending exceeds savings?
+        months_sim = 36
+        totals     = _simulate(distributions, months_sim)  # (N_SIMS, months)
+        cumulative = np.cumsum(totals, axis=1)             # (N_SIMS, months)
+
+        runways = []
+        for sim in range(N_SIMS):
+            exceeded = np.where(cumulative[sim] > estimated_savings)[0]
+            runways.append(int(exceeded[0]) if len(exceeded) else months_sim)
+
+        runways = np.array(runways, dtype=float)
+
+        # discretionary to cut, sorted by monthly spend
+        categories_to_cut = sorted(
+            [
+                {
+                    "category": cat,
+                    "monthly_avg": round(params["mean"], 2),
+                    "potential_savings": round(params["mean"], 2),
+                }
+                for cat, params in distributions.items()
+                if cat.lower() in DISCRETIONARY_CATEGORIES
+            ],
+            key=lambda x: x["monthly_avg"], reverse=True,
+        )[:3]
+
+        min_budget = sum(
+            params["mean"] for cat, params in distributions.items()
+            if cat.lower() in ESSENTIAL_CATEGORIES
+        )
+
+        return {
+            "scenario":               "job_loss",
+            "months_of_runway":       round(float(np.median(runways)), 1),
+            "runway_ci":              {
+                "p10": round(float(np.percentile(runways, 10)), 1),
+                "p90": round(float(np.percentile(runways, 90)), 1),
+            },
+            "estimated_savings":      round(estimated_savings, 2),
+            "minimum_monthly_budget": round(min_budget, 2),
+            "categories_to_cut":      categories_to_cut,
+        }
+
+
     elif scenario == "subscription_purge":
-        return _stress_subscription_purge(df)
+
+        sub_monthly    = distributions.get("Subscriptions", {}).get("mean", 0.0)
+        annual_savings = sub_monthly * 12
+
+        # compound at 4%/yr with monthly contributions over 5 years
+        r      = 0.04 / 12
+        fv_5yr = sub_monthly * ((1 + r) ** 60 - 1) / r if r > 0 else annual_savings * 5
+
+        return {
+            "scenario":        "subscription_purge",
+            "monthly_savings": round(sub_monthly, 2),
+            "annual_savings":  round(annual_savings, 2),
+            "compounded_5yr":  round(fv_5yr, 2),
+        }
 
 
-def _stress_job_loss(df: pd.DataFrame) -> dict:
-    """Income drops to 0 — how many months can you survive?"""
+    elif scenario == "expense_increase":
 
-    projection = run_projection(df, months=24, n_sims=1000, scenario={"type": "job_loss"})
+        # housing +20% — biggest essential that could realistically spike
+        housing = distributions.get("Rent & Housing", {}).get("mean", 0.0)
+        impact  = housing * 0.20
 
-    if "error" in projection:
-        return {"scenario": "job_loss", "error": projection["error"]}
-
-    # find month where median cumulative crosses zero
-    median_cum = projection["cumulative_net"][50]
-    months_of_runway = 0
-
-    for i, val in enumerate(median_cum):
-        if val < 0:
-            # interpolate between this month and previous
-            if i == 0:
-                months_of_runway = 0
-            else:
-                prev = median_cum[i - 1]
-                months_of_runway = i + (prev / (prev - val)) if prev != val else i
-            break
-    else:
-        months_of_runway = len(median_cum)
-
-    # confidence interval from 10th and 90th percentile crossings
-    ci_low  = _find_crossover(projection["cumulative_net"][90])
-    ci_high = _find_crossover(projection["cumulative_net"][10])
-
-    # minimum monthly budget = median monthly spending (75th pct for conservative)
-    monthly_spending = projection["baseline"]["monthly_spending"]
-
-    # categories to cut, ranked by monthly avg, essentials excluded
-    spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
-    spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
-
-    cat_monthly = spend_df.groupby("category")["amount"].sum() / max(1, spend_df["month"].nunique())
-
-    categories_to_cut = []
-    for cat, avg in cat_monthly.sort_values(ascending=False).items():
-        if cat.lower() in ESSENTIAL_CATEGORIES:
-            continue
-        if avg < 20:
-            continue
-        categories_to_cut.append({
-            "category":          cat,
-            "monthly_avg":       round(float(avg), 2),
-            "potential_savings": round(float(avg) * 0.5, 2),
-        })
-
-    return {
-        "scenario":              "job_loss",
-        "months_of_runway":      round(months_of_runway, 1),
-        "confidence_interval":   [round(ci_low, 1), round(ci_high, 1)],
-        "minimum_monthly_budget": round(monthly_spending, 2),
-        "categories_to_cut":     categories_to_cut[:5],
-        "projection":            projection,
-    }
+        return {
+            "scenario":        "expense_increase",
+            "category":        "Rent & Housing",
+            "current_monthly": round(housing, 2),
+            "monthly_impact":  round(impact, 2),
+            "annual_impact":   round(impact * 12, 2),
+        }
 
 
-def _stress_expense_increase(df: pd.DataFrame) -> dict:
-    """Housing costs +20% — impact on monthly savings."""
-
-    baseline   = run_projection(df, months=12, n_sims=1000)
-    increased  = run_projection(df, months=12, n_sims=1000,
-                                scenario={"type": "expense_increase", "category": "Rent & Housing", "multiplier": 1.2})
-
-    if "error" in baseline or "error" in increased:
-        return {"scenario": "expense_increase", "error": "Not enough data"}
-
-    baseline_net  = baseline["cumulative_net"][50][-1] / 12
-    increased_net = increased["cumulative_net"][50][-1] / 12
-    delta         = increased_net - baseline_net
-
-    return {
-        "scenario":            "expense_increase",
-        "category":            "Rent & Housing",
-        "multiplier":          1.2,
-        "baseline_monthly_net":  round(baseline_net, 2),
-        "increased_monthly_net": round(increased_net, 2),
-        "monthly_impact":        round(delta, 2),
-        "annual_impact":         round(delta * 12, 2),
-        "projection":            increased,
-    }
-
-
-def _stress_subscription_purge(df: pd.DataFrame) -> dict:
-    """Cancel all discretionary subs — show savings compounded over time."""
-
-    recurring = detect_recurring_charges(df)
-    essential_cats = {"bills & utilities", "insurance", "rent & housing", "education", "health"}
-
-    discretionary_subs = [
-        r for r in recurring
-        if r["frequency"] == "monthly"
-        and r.get("category", "").lower() not in essential_cats
-    ]
-
-    monthly_savings = sum(r["amount"] for r in discretionary_subs)
-    annual_savings  = monthly_savings * 12
-
-    # compound at 4% annual rate (conservative investment return)
-    compounded = {}
-    for years in [1, 3, 5]:
-        rate    = 0.04
-        monthly = monthly_savings
-        total   = 0
-        for m in range(years * 12):
-            total = (total + monthly) * (1 + rate / 12)
-        compounded[f"{years}yr"] = round(total, 2)
-
-    projection = run_projection(df, months=12, n_sims=1000, scenario={"type": "subscription_purge"})
-
-    return {
-        "scenario":              "subscription_purge",
-        "subscriptions_purged":  [{"merchant": r["merchant"], "amount": r["amount"]} for r in discretionary_subs],
-        "monthly_savings":       round(monthly_savings, 2),
-        "annual_savings":        round(annual_savings, 2),
-        "compounded_savings":    compounded,
-        "projection":            projection,
-    }
+    return {"error": f"Unknown scenario: {scenario}"}
 
 
 
 ####################################
-# STEP 4: CALCULATE RUNWAY
+# STEP 5: CALCULATE RUNWAY
 ####################################
 
 def calculate_runway(df: pd.DataFrame) -> dict:
     """
-    Months until savings depleted at current burn rate.
+    How many months would savings last without income?
+    Estimated savings = total income - total spending over data period.
 
-      calculate_runway(df)  -> {"months_of_runway": 14.2, "confidence_interval": [11.5, 18.1]}
+      calculate_runway(df)
+      -> {"months_of_runway": 8.3, "monthly_burn": 3800.0, "estimated_savings": 31540.0}
     """
 
-    income   = _get_monthly_income(df)
-    spending = _get_monthly_spending(df)
+    if "category" not in df.columns:
+        return {"months_of_runway": None, "reason": "No category data"}
 
-    if income == 0 and spending > 0:
-        return {
-            "months_of_runway":    0,
-            "confidence_interval": [0, 0],
-            "monthly_burn_rate":   round(spending, 2),
-            "monthly_income":      0,
-            "net_monthly":         round(-spending, 2),
-        }
+    income_mask = df["category"].fillna("").str.lower() == "income"
+    spend_mask  = ~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])
 
-    net = income - spending
+    if not income_mask.any():
+        return {"months_of_runway": None, "reason": "No income detected"}
 
-    if net >= 0:
-        return {
-            "months_of_runway":    float('inf'),
-            "confidence_interval": [float('inf'), float('inf')],
-            "monthly_burn_rate":   0,
-            "monthly_income":      round(income, 2),
-            "net_monthly":         round(net, 2),
-        }
+    total_income      = float(df[income_mask]["amount"].sum())
+    total_spending    = float(df[spend_mask]["amount"].sum())
+    estimated_savings = max(0.0, total_income - total_spending)
 
-    # Monte Carlo: project with income to find when cumulative crosses zero
-    projection = run_projection(df, months=36, n_sims=1000)
+    n_months       = max(1, int(df["date"].dt.to_period("M").nunique()))
+    monthly_burn   = total_spending / n_months
+    monthly_income = total_income / n_months
+    net_monthly    = monthly_income - monthly_burn
 
-    if "error" in projection:
-        # fallback: simple division
-        runway = income / spending * 30 if spending > 0 else 0
-        return {
-            "months_of_runway":    round(runway, 1),
-            "confidence_interval": [round(runway * 0.7, 1), round(runway * 1.3, 1)],
-            "monthly_burn_rate":   round(-net, 2),
-            "monthly_income":      round(income, 2),
-            "net_monthly":         round(net, 2),
-        }
+    if monthly_burn <= 0:
+        return {"months_of_runway": None, "reason": "No spending detected"}
 
-    median_runway = _find_crossover(projection["cumulative_net"][50])
-    ci_low        = _find_crossover(projection["cumulative_net"][90])
-    ci_high       = _find_crossover(projection["cumulative_net"][10])
+    months_of_runway = estimated_savings / monthly_burn
 
     return {
-        "months_of_runway":    round(median_runway, 1),
-        "confidence_interval": [round(ci_low, 1), round(ci_high, 1)],
-        "monthly_burn_rate":   round(-net, 2),
-        "monthly_income":      round(income, 2),
-        "net_monthly":         round(net, 2),
+        "months_of_runway":  round(months_of_runway, 1),
+        "monthly_burn":      round(monthly_burn, 2),
+        "monthly_income":    round(monthly_income, 2),
+        "net_monthly":       round(net_monthly, 2),
+        "estimated_savings": round(estimated_savings, 2),
     }
-
-
-def _get_monthly_spending(df: pd.DataFrame) -> float:
-    """Average monthly spending (excluding income/transfers)."""
-
-    spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
-
-    if spend_df.empty:
-        return 0
-
-    spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
-    monthly = spend_df.groupby("month")["amount"].sum()
-
-    return float(monthly.mean()) if len(monthly) > 0 else 0
-
-
-def _find_crossover(cumulative: list) -> float:
-    """Find the month where cumulative net crosses zero (interpolated)."""
-
-    for i, val in enumerate(cumulative):
-        if val < 0:
-            if i == 0:
-                return 0
-            prev = cumulative[i - 1]
-            return i + (prev / (prev - val)) if prev != val else float(i)
-
-    return float(len(cumulative))

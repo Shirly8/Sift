@@ -24,13 +24,14 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-sys.path.insert(0, os.path.dirname(__file__))
+sys.path.insert(0, os.path.dirname(__file__))  # allows `python app.py` without pip install -e .
 
 from Ingestion.format_detector       import detect_csv_format, validate_csv_structure, normalize_to_standard
-from Ingestion.normalizer            import clean_merchant_name, deduplicate_transactions, validate_date_range, calculate_data_quality_score
+from Ingestion.normalizer            import clean_merchant_name, deduplicate_transactions, validate_date_range
 from Categorization.rule_categorizer import build_rule_engine, batch_categorize
 from Categorization.merchant_db      import lookup_merchant, load_merchant_db, update_from_user_correction, _save_db, DB_PATH
 from Categorization.llm_categorizer  import batch_categorize_llm, CATEGORIES
+from Categorization.constants        import LLM_DEFAULT_CONFIDENCE, USER_VERIFIED_CONFIDENCE, RECAT_THRESHOLD, CACHE_THRESHOLD
 from Agent.orchestrator              import run as run_agent
 from Agent.synthesizer               import synthesize_insights, generate_savings_plan
 from Agent.conversational            import ask as agent_ask
@@ -66,6 +67,46 @@ _analyzing_lock  = threading.Lock()
 MAX_SESSIONS     = 50
 SESSION_TTL      = 3600         # 1 hour — sessions expire after this
 MAX_QUESTION_LEN = 500          # max chars for /api/ask questions
+MAX_ROWS         = 50000        # max rows per CSV upload — prevents memory exhaustion
+
+
+####################################
+# HELPER: LLM CATEGORIZATION
+####################################
+
+def _auto_categorize_with_llm(df: pd.DataFrame, progress_callback=None) -> pd.DataFrame:
+    """
+    Auto-categorize uncategorized transactions via LLM.
+    Mutates df in-place. Used by both /analyze and /analyze-stream.
+    """
+    uncategorized_mask = df["category"].fillna("").eq("") | df["category"].isna()
+    if not uncategorized_mask.any():
+        return df
+
+    if progress_callback:
+        progress_callback({"step": "Categorizing merchants..."})
+    else:
+        print(f"Auto-categorizing {uncategorized_mask.sum()} uncategorized transactions...")
+
+    uncategorized_merchants = df[uncategorized_mask]["merchant"].unique().tolist()
+    if not uncategorized_merchants:
+        return df
+
+    try:
+        llm_results = batch_categorize_llm(uncategorized_merchants)
+        for _, row in llm_results.iterrows():
+            merchant_mask = df["merchant"] == row["merchant"]
+            df.loc[merchant_mask, "category"] = row["category"]
+            df.loc[merchant_mask, "confidence"] = LLM_DEFAULT_CONFIDENCE
+
+        still_uncategorized = df["category"].fillna("").eq("") | df["category"].isna()
+        newly_categorized = uncategorized_mask & ~still_uncategorized
+        print(f"  Categorized {newly_categorized.sum()} transactions via LLM")
+
+    except Exception as e:
+        print(f"  LLM categorization failed: {e} — proceeding with available data")
+
+    return df
 
 
 ####################################
@@ -95,9 +136,13 @@ def serialize_for_json(obj):
 ####################################
 
 def _evict_expired_sessions():
-    """Remove sessions older than SESSION_TTL. Call inside _sessions_lock."""
+    """Remove sessions older than SESSION_TTL. Call inside _sessions_lock.
+    Skips sessions currently running analysis to prevent data loss."""
     now = time.time()
-    expired = [sid for sid, s in _sessions.items() if now - s["created_at"] > SESSION_TTL]
+    expired = [
+        sid for sid, s in _sessions.items()
+        if now - s["created_at"] > SESSION_TTL and sid not in _analyzing
+    ]
     for sid in expired:
         del _sessions[sid]
     if expired:
@@ -134,6 +179,81 @@ def _update_session(session_id: str, key: str, value):
 
 
 ####################################
+# HELPER: INGESTION PIPELINE
+####################################
+
+def _ingest_csv(content: str, rules: dict, merchant_db: dict) -> tuple:
+    """
+    Parse CSV -> normalize -> categorize -> cache.
+    Returns (df, format_type, summary_dict).
+    Raises ValueError for validation failures.
+    """
+
+    format_type = detect_csv_format(io.StringIO(content))
+    df_raw      = pd.read_csv(io.StringIO(content))
+
+    if len(df_raw) > MAX_ROWS:
+        raise ValueError(f"CSV too large ({len(df_raw)} rows). Maximum is {MAX_ROWS} rows.")
+
+    validate_csv_structure(df_raw, format_type)
+    df = normalize_to_standard(df_raw, format_type)
+
+    # clean + validate
+    df["merchant"] = df["merchant"].apply(clean_merchant_name)
+    df             = deduplicate_transactions(df)
+    start, end     = validate_date_range(df)
+
+    # rule categorization
+    result           = batch_categorize(df["merchant"].tolist(), rules)
+    df["category"]   = result["category"].values
+    df["confidence"] = result["confidence"].values
+
+    # check in-memory merchant cache for uncategorized
+    with _merchant_lock:
+        for i, row in df[df["category"].isna()].iterrows():
+            cat, conf, _ = lookup_merchant(row["merchant"], db=merchant_db)
+            if cat:
+                df.at[i, "category"]   = cat
+                df.at[i, "confidence"] = conf
+
+    # split: categorized vs needs LLM
+    needs_llm_count = df[df["category"].isna() | (df["confidence"] < RECAT_THRESHOLD)]["merchant"].nunique()
+    categorized     = int(df["category"].notna().sum())
+
+    # update in-memory cache + persist to disk
+    changed = False
+    with _merchant_lock:
+        for _, row in df[df["confidence"] >= CACHE_THRESHOLD].iterrows():
+            key = row["merchant"].upper()
+            if key not in merchant_db or not merchant_db.get(key, {}).get("user_verified"):
+                merchant_db[key] = {
+                    "category":      row["category"],
+                    "confidence":    float(row["confidence"]),
+                    "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
+                    "user_verified": False,
+                }
+                changed = True
+
+    if changed:
+        _save_db(merchant_db, DB_PATH)
+
+    summary = {
+        "total":        len(df),
+        "categorized":  categorized,
+        "needs_llm":    needs_llm_count,
+        "coverage_pct": round(categorized / len(df) * 100, 1) if len(df) else 0,
+        "date_range": {
+            "start": str(start.date()),
+            "end":   str(end.date()),
+            "days":  int((end - start).days),
+        },
+    }
+
+    return df, format_type, summary
+
+
+
+####################################
 # ROUTES
 ####################################
 
@@ -161,96 +281,29 @@ def upload():
     if not file.filename.endswith(".csv"):
         return jsonify({"error": "Only CSV files are supported"}), 400
 
-
-    # read into memory — never touch disk
+    # read into memory — UTF-8 first, latin-1 fallback
     raw_bytes = file.stream.read()
-
-    # UTF-8 first, latin-1 fallback for bank exports with special chars
     try:
         content = raw_bytes.decode("utf-8")
     except UnicodeDecodeError:
         content = raw_bytes.decode("latin-1")
 
-    csv_buffer = io.StringIO(content)
-
-
     try:
-        format_type = detect_csv_format(io.StringIO(content))
-        df_raw      = pd.read_csv(csv_buffer)
+        df, format_type, summary = _ingest_csv(content, _rules, _merchant_db)
 
-        validate_csv_structure(df_raw, format_type)
-        df = normalize_to_standard(df_raw, format_type)
-
-        # clean + validate
-        df["merchant"] = df["merchant"].apply(clean_merchant_name)
-        df             = deduplicate_transactions(df)
-        start, end     = validate_date_range(df)
-        quality_score  = calculate_data_quality_score(df)
-
-        # rule categorization
-        result           = batch_categorize(df["merchant"].tolist(), _rules)
-        df["category"]   = result["category"].values
-        df["confidence"] = result["confidence"].values
-
-        # check in-memory merchant cache for uncategorized
-        with _merchant_lock:
-            for i, row in df[df["category"].isna()].iterrows():
-                cat, conf, _ = lookup_merchant(row["merchant"], db=_merchant_db)
-                if cat:
-                    df.at[i, "category"]   = cat
-                    df.at[i, "confidence"] = conf
-
-        # split: categorized vs needs LLM
-        needs_llm   = df[df["category"].isna() | (df["confidence"] < 0.7)]["merchant"].unique().tolist()
-        categorized = int(df["category"].notna().sum())
-
-
-        # update in-memory cache + persist to disk
-        changed = False
-
-        with _merchant_lock:
-            for _, row in df[df["confidence"] >= 0.8].iterrows():
-                key = row["merchant"].upper()
-                if key not in _merchant_db or not _merchant_db.get(key, {}).get("user_verified"):
-                    _merchant_db[key] = {
-                        "category":      row["category"],
-                        "confidence":    float(row["confidence"]),
-                        "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
-                        "user_verified": False,
-                    }
-                    changed = True
-
-        if changed:
-            _save_db(_merchant_db, DB_PATH)
-
-
-        # store session — analysis runs separately in /api/analyze
         session_id = str(uuid.uuid4())
-
         _store_session(session_id, {
             "df":               df,
             "analysis_results": None,
             "created_at":       time.time(),
         })
 
-        response_data = {
-            "status":       "success",
-            "session_id":   session_id,
-            "format_type":  format_type,
-            "summary": {
-                "total":        len(df),
-                "categorized":  categorized,
-                "needs_llm":    len(needs_llm),
-                "coverage_pct": round(categorized / len(df) * 100, 1) if len(df) else 0,
-                "quality_score": float(quality_score),
-                "date_range": {
-                    "start": str(start.date()),
-                    "end":   str(end.date()),
-                    "days":  int((end - start).days),
-                },
-            },
-        }
-        return jsonify(serialize_for_json(response_data))
+        return jsonify(serialize_for_json({
+            "status":      "success",
+            "session_id":  session_id,
+            "format_type": format_type,
+            "summary":     summary,
+        }))
 
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
@@ -299,28 +352,7 @@ def analyze():
 
 
     try:
-        # auto-categorize any uncategorized transactions before analysis
-        uncategorized_mask = df["category"].fillna("").eq("") | df["category"].isna()
-        if uncategorized_mask.any():
-            print(f"Auto-categorizing {uncategorized_mask.sum()} uncategorized transactions...")
-
-            uncategorized_merchants = df[uncategorized_mask]["merchant"].unique().tolist()
-            if uncategorized_merchants:
-                try:
-                    llm_results = batch_categorize_llm(uncategorized_merchants)
-
-                    # apply LLM results back to DataFrame
-                    for _, row in llm_results.iterrows():
-                        merchant_mask = df["merchant"] == row["merchant"]
-                        df.loc[merchant_mask, "category"] = row["category"]
-                        df.loc[merchant_mask, "confidence"] = row.get("confidence", 0.5)
-
-                    still_uncategorized = df["category"].fillna("").eq("") | df["category"].isna()
-                    newly_categorized = uncategorized_mask & ~still_uncategorized
-                    print(f"  Categorized {newly_categorized.sum()} transactions via LLM")
-
-                except Exception as e:
-                    print(f"  LLM categorization failed: {e} — proceeding with available data")
+        _auto_categorize_with_llm(df)
 
         # orchestrator: profile -> plan -> execute tools
         results = run_agent(df)
@@ -331,7 +363,8 @@ def analyze():
         )
 
         # savings plan: concrete opportunities from analysis + transaction data
-        results["savings_plan"] = generate_savings_plan(df, results["results"])
+        results["savings_plan"] = generate_savings_plan(df, results["results"], results.get("profile"))
+        results["savings_potential"] = results["savings_plan"]["total_annual_savings"] if results.get("savings_plan") else 0
 
         # persist so /api/ask can access without re-running
         if session_id:
@@ -380,21 +413,7 @@ def analyze_stream():
 
         def run_analysis():
             try:
-                # LLM categorization (if needed)
-                uncategorized_mask = df["category"].fillna("").eq("") | df["category"].isna()
-                if uncategorized_mask.any():
-                    q.put({"step": "Categorizing merchants..."})
-
-                    uncategorized_merchants = df[uncategorized_mask]["merchant"].unique().tolist()
-                    if uncategorized_merchants:
-                        try:
-                            llm_results = batch_categorize_llm(uncategorized_merchants)
-                            for _, row in llm_results.iterrows():
-                                merchant_mask = df["merchant"] == row["merchant"]
-                                df.loc[merchant_mask, "category"] = row["category"]
-                                df.loc[merchant_mask, "confidence"] = row.get("confidence", 0.5)
-                        except Exception as e:
-                            print(f"  LLM categorization failed: {e}")
+                _auto_categorize_with_llm(df, progress_callback=q.put)
 
                 # orchestrator: profile -> plan -> execute tools (emits {"step": "..."} via callback)
                 results = run_agent(df, on_progress=on_progress)
@@ -406,7 +425,8 @@ def analyze_stream():
                 )
 
                 # savings plan: concrete opportunities from analysis + transaction data
-                results["savings_plan"] = generate_savings_plan(df, results["results"])
+                results["savings_plan"] = generate_savings_plan(df, results["results"], results.get("profile"))
+                results["savings_potential"] = results["savings_plan"]["total_annual_savings"] if results.get("savings_plan") else 0
 
                 # persist so /api/ask can access without re-running
                 _update_session(session_id, "analysis_results", results)
@@ -493,6 +513,7 @@ def ask_question():
 
 
 @app.route("/api/correct-category", methods=["POST"])
+@limiter.limit("30 per day")
 def correct_category():
     """
     Learn from user category corrections.
@@ -522,7 +543,7 @@ def correct_category():
     with _merchant_lock:
         _merchant_db[merchant.upper()] = {
             "category":      category,
-            "confidence":    0.99,
+            "confidence":    USER_VERIFIED_CONFIDENCE,
             "last_verified": pd.Timestamp.now().strftime("%Y-%m-%d"),
             "user_verified": True,
         }

@@ -20,7 +20,7 @@ import pandas as pd
 BANK_SCHEMAS = {
     "wealthsimple_cash": ["date", "transaction", "description", "amount"],
     "wealthsimple":      ["transaction date", "description", "amount"],
-    "rbc":               ["transaction date", "posting date", "activity description"],
+    "rbc":               ["transaction date", "posting date", "activity description", "amount ($)"],
     "td":                ["date", "description", "debit", "credit"],
     "bmo":               ["date", "description", "amount"],
 }
@@ -35,7 +35,12 @@ COLUMN_MAP = {
 }
 
 TRANSACTION_TYPE_FILTERS = {
-    "wealthsimple_cash": ("transaction", "SPEND"), # "transaction" column has SPEND for spending analysis
+    "wealthsimple_cash": ("transaction", ["SPEND", "AFT_IN", "P2P_IN", "REFUND"]),
+}
+
+# transaction types that mean money IN -> auto-tag as Income
+INCOME_TRANSACTION_TYPES = {
+    "wealthsimple_cash": ("transaction", ["AFT_IN"]),
 }
 
 
@@ -93,16 +98,34 @@ def validate_csv_structure(df: pd.DataFrame, format_type: str) -> bool:
     return True
 
 
+####################################
+# STEP 3: NORMALIZE TO SCHEMA
+####################################
+
 def _clean_amount(series):
     """Remove currency symbols and commas from amount strings (e.g., '$1,234.56' -> '1234.56')"""
     return series.astype(str).str.replace(r'[$,]', '', regex=True)
 
 
-####################################
-# STEP 3: NORMALIZE TO SCHEMA
-####################################
+def _guess_columns(headers: list) -> dict:
+
+    mapping = {"date": None, "amount": None, "merchant": None}
+
+    for h in headers:
+        if any(kw in h for kw in ["date", "posted", "time"]):
+            mapping["date"] = h
+        elif any(kw in h for kw in ["amount", "debit", "withdrawal", "charge"]):
+            mapping["amount"] = h
+        elif any(kw in h for kw in ["merchant", "description", "payee", "name"]):
+            mapping["merchant"] = h
+
+    return mapping
+
 
 def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
+
+    if df.empty:
+        raise ValueError("CSV file contains no transaction data (only headers or empty)")
 
     df.columns = [col.strip().lower() for col in df.columns]
 
@@ -114,11 +137,12 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
 
     # filter to spending rows only (e.g. wealthsimple_cash has INT/SPEND/etc.)
     if format_type in TRANSACTION_TYPE_FILTERS:
-        type_col, type_val = TRANSACTION_TYPE_FILTERS[format_type]
+        type_col, type_vals = TRANSACTION_TYPE_FILTERS[format_type]
         if type_col in df.columns:
-            before = len(df)
-            df     = df[df[type_col].str.upper() == type_val.upper()].copy()
-            print(f"Filtered to {type_val} transactions: {len(df)}/{before} rows kept")
+            before    = len(df)
+            allowed   = [v.upper() for v in type_vals] if isinstance(type_vals, list) else [type_vals.upper()]
+            df        = df[df[type_col].str.upper().isin(allowed)].copy()
+            print(f"Filtered to {allowed} transactions: {len(df)}/{before} rows kept")
 
     out = pd.DataFrame()
 
@@ -137,6 +161,13 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
     # TD has separate debit/credit columns — combine them
 
     amount_col = mapping["amount"]
+    # fallback: RBC exports sometimes have "amount" instead of "amount ($)"
+    if amount_col and amount_col not in df.columns:
+        if format_type == "rbc" and "amount" in df.columns:
+            amount_col = "amount"
+            print(f"RBC fallback: using 'amount' column instead of '{mapping['amount']}'")
+        else:
+            amount_col = None
     if amount_col and amount_col in df.columns:
         amount_series = pd.to_numeric(_clean_amount(df[amount_col]), errors="coerce")
 
@@ -155,6 +186,20 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
 
     out["category"] = ""
 
+    # tag income by transaction direction — money IN = Income
+    if format_type in INCOME_TRANSACTION_TYPES:
+        type_col, income_types = INCOME_TRANSACTION_TYPES[format_type]
+        if type_col in df.columns:
+            allowed    = [t.upper() for t in income_types]
+            income_idx = df.index[df[type_col].str.upper().isin(allowed)]
+            out.loc[out.index.isin(income_idx), "category"] = "Income"
+
+    # TD: credit column rows are income (debit was NaN, filled from credit)
+    if format_type == "td" and "credit" in df.columns:
+        credit_rows = df.index[pd.to_numeric(_clean_amount(df["credit"]), errors="coerce").notna()
+                               & pd.to_numeric(_clean_amount(df["debit"]), errors="coerce").isna()]
+        out.loc[out.index.isin(credit_rows), "category"] = "Income"
+
     out = out.dropna(subset=["date", "amount"])
 
     # ensure date column is datetime — parse once here so downstream tools
@@ -162,21 +207,9 @@ def normalize_to_standard(df: pd.DataFrame, format_type: str) -> pd.DataFrame:
     out["date"] = pd.to_datetime(out["date"], errors="coerce")
     out = out.dropna(subset=["date"])
 
+    if out.empty:
+        raise ValueError("No valid transactions after parsing — check that dates and amounts are present")
+
     print(f"Normalized {len(out)} transactions from {format_type} format")
     return out
 
-
-
-def _guess_columns(headers: list) -> dict:
-
-    mapping = {"date": None, "amount": None, "merchant": None}
-
-    for h in headers:
-        if any(kw in h for kw in ["date", "posted", "time"]):
-            mapping["date"] = h
-        elif any(kw in h for kw in ["amount", "debit", "withdrawal", "charge"]):
-            mapping["amount"] = h
-        elif any(kw in h for kw in ["merchant", "description", "payee", "name"]):
-            mapping["merchant"] = h
-
-    return mapping

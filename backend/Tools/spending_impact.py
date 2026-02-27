@@ -24,7 +24,7 @@ import pandas as pd
 
 def fit_impact_model(df: pd.DataFrame) -> dict:
 
-    dates = pd.to_datetime(df["date"])
+    dates = df["date"]
 
     # need 6+ months
     span_days = (dates.max() - dates.min()).days
@@ -34,7 +34,7 @@ def fit_impact_model(df: pd.DataFrame) -> dict:
 
     # skip income/transfer
     spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
-    spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
+    spend_df["month"] = spend_df["date"].dt.to_period("M")
 
     # monthly totals per category
     pivot = spend_df.pivot_table(

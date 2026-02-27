@@ -1,5 +1,5 @@
 """
-Centralized LLM client — routes to Ollama, Claude, OpenAI, or Gemini
+Routes Ollama, Claude, OpenAI, or Gemini
 
 Provider auto-detected from env vars (or set LLM_PROVIDER explicitly):
   ANTHROPIC_API_KEY  -> claude
@@ -31,55 +31,51 @@ COST_ABORT = 1.00
 
 _provider       = None
 _default_model  = None
-_session_cost   = 0.0
-_session_tokens = 0
 _clients        = {}            # provider -> reusable client instance
+_session_cost   = 0.0           # cumulative cost of session (dollars)
+_session_tokens = 0
 
 
 
 ####################################
-# STEP 1: AUTO-DETECT PROVIDER
-####################################
-
-def _detect_provider() -> tuple:
-    """
-    Returns (provider, default_model).
-    Priority: LLM_PROVIDER env var > API key detection > ollama fallback.
-    """
-    explicit = os.getenv("LLM_PROVIDER", "").lower()
-
-    if explicit == "claude" or (not explicit and os.getenv("ANTHROPIC_API_KEY")):
-        return "claude", os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
-
-    if explicit == "openai" or (not explicit and os.getenv("OPENAI_API_KEY")):
-        return "openai", os.getenv("OPENAI_MODEL", "gpt-4o-mini")
-
-    if explicit == "gemini" or (not explicit and os.getenv("GEMINI_API_KEY")):
-        return "gemini", os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
-
-    # default: Ollama (local, no key needed)
-    return "ollama", os.getenv("OLLAMA_MODEL", "llama3.1:8b")
-
-
-
-####################################
-# STEP 2: INITIALIZE
+# STEP 1: INITIALIZE & AUTO-DETECT PROVIDER
 ####################################
 
 def initialize_llm_client(provider: str = None):
+    """
+    Priority: LLM_PROVIDER env var > API key detection > ollama fallback.
+    """
+    
     global _provider, _default_model
 
     if provider:
         os.environ["LLM_PROVIDER"] = provider
 
-    _provider, _default_model = _detect_provider()
+    explicit = os.getenv("LLM_PROVIDER", "").lower()
+
+    if explicit == "claude" or (not explicit and os.getenv("ANTHROPIC_API_KEY")):
+        _provider = "claude"
+        _default_model = os.getenv("CLAUDE_MODEL", "claude-haiku-4-5-20251001")
+
+    elif explicit == "openai" or (not explicit and os.getenv("OPENAI_API_KEY")):
+        _provider = "openai"
+        _default_model = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
+
+    elif explicit == "gemini" or (not explicit and os.getenv("GEMINI_API_KEY")):
+        _provider = "gemini"
+        _default_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+
+    else:
+        _provider = "ollama"
+        _default_model = os.getenv("OLLAMA_MODEL", "llama3.1:8b")
+
     print(f"LLM provider: {_provider} | model: {_default_model}")
     return _provider
 
 
 
 ####################################
-# STEP 3: PROVIDER IMPLEMENTATIONS
+# STEP 2: PROVIDER IMPLEMENTATIONS
 ####################################
 
 def _call_claude(prompt, model, temperature, max_tokens) -> str:
@@ -130,7 +126,6 @@ def _call_gemini(prompt, model, temperature, max_tokens) -> str:
         ),
     )
 
-    # gemini tracks usage differently — estimate from response if available
     if hasattr(response, "usage_metadata") and response.usage_metadata:
         _track_usage(
             getattr(response.usage_metadata, "prompt_token_count", 0) or 0,
@@ -153,7 +148,7 @@ def _call_ollama(prompt, model, temperature, max_tokens) -> str:
             "stream":  False,
             "options": {"temperature": temperature, "num_predict": max_tokens},
         },
-        timeout=60.0,
+        timeout=90.0,
     )
     response.raise_for_status()
     return response.json()["message"]["content"].strip()
@@ -165,6 +160,29 @@ _DISPATCH = {
     "gemini": _call_gemini,
     "ollama": _call_ollama,
 }
+
+
+
+
+####################################
+# STEP 3: COST TRACKING
+####################################
+
+def _estimate_cost(input_tokens: int, output_tokens: int, model: str = None) -> float:
+    """Calculate cost in dollars for given token usage."""
+    prices = PRICING.get(model, {"input": 0.0, "output": 0.0})
+    return (input_tokens / 1_000_000) * prices["input"] + \
+           (output_tokens / 1_000_000) * prices["output"]
+
+
+def _track_usage(input_tokens: int, output_tokens: int, model: str):
+    """Track tokens and cost for this session."""
+    global _session_cost, _session_tokens
+    cost = _estimate_cost(input_tokens, output_tokens, model)
+    _session_cost += cost
+    _session_tokens += input_tokens + output_tokens
+    if _session_cost > COST_WARN:
+        print(f"Warning: Session LLM cost at ${_session_cost:.2f}")
 
 
 
@@ -199,8 +217,6 @@ def call_llm(prompt: str, temperature: float = 0.0, max_tokens: int = 500, model
             print(f"LLM error (attempt {attempt + 1}): {e} — retrying in {wait}s")
             time.sleep(wait)
 
-    return None
-
 
 
 ####################################
@@ -219,7 +235,18 @@ def extract_json(raw: str) -> str:
     if not raw:
         return "{}"
 
+    # fenced code block
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
+    if match:
+        return match.group(1).strip()
+
+    # bare JSON array in surrounding text
+    match = re.search(r"(\[[\s\S]*\])", raw)
+    if match:
+        return match.group(1).strip()
+
+    # bare JSON object in surrounding text
+    match = re.search(r"(\{[\s\S]*\})", raw)
     if match:
         return match.group(1).strip()
 
@@ -227,20 +254,3 @@ def extract_json(raw: str) -> str:
 
 
 
-####################################
-# STEP 6: COST / USAGE TRACKING
-####################################
-
-def _track_usage(input_tokens: int, output_tokens: int, model: str):
-    global _session_cost, _session_tokens
-    cost             = _estimate_cost(input_tokens, output_tokens, model)
-    _session_cost   += cost
-    _session_tokens += input_tokens + output_tokens
-    if _session_cost > COST_WARN:
-        print(f"Warning: Session LLM cost at ${_session_cost:.2f}")
-
-
-def _estimate_cost(input_tokens: int, output_tokens: int, model: str = None) -> float:
-    prices = PRICING.get(model, {"input": 0.0, "output": 0.0})
-    return (input_tokens / 1_000_000) * prices["input"] + \
-           (output_tokens / 1_000_000) * prices["output"]

@@ -14,9 +14,6 @@ import time
 import pandas as pd
 from concurrent.futures import ThreadPoolExecutor, as_completed
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from Tools.temporal_patterns      import detect_payday_pattern, detect_weekly_pattern, detect_seasonal_pattern
 from Tools.anomaly_detector       import detect_transaction_outliers, detect_spending_spikes, detect_new_merchants
 from Tools.subscription_hunter    import detect_recurring_charges, detect_price_creep, detect_subscription_overlap
@@ -44,16 +41,21 @@ TOOL_REQUIREMENTS = {
 def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     """Compute aggregate spending metrics from transactions."""
 
-    # only count expenses (negative amounts or non-income categories)
+    # only count expenses (exclude income & transfers)
     df_spend = df.copy()
     if "amount" in df_spend.columns:
         df_spend["amount"] = df_spend["amount"].abs()
 
+    df_spend["date"] = pd.to_datetime(df_spend["date"])
+    df_spend["month"] = df_spend["date"].dt.to_period("M")
+
+    # Filter out income and transfers so totals reflect actual spending
+    if "category" in df_spend.columns:
+        df_spend = df_spend[~df_spend["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
+
     total_spent = float(df_spend["amount"].sum())
 
     # monthly breakdown
-    df_spend["date"] = pd.to_datetime(df_spend["date"])
-    df_spend["month"] = df_spend["date"].dt.to_period("M")
     monthly = df_spend.groupby("month")["amount"].sum()
 
     monthly_totals = monthly.tolist()
@@ -80,10 +82,10 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     # recent 3-month average
     recent_3mo = monthly.tail(3).mean() if len(monthly) >= 3 else monthly_avg
 
-    # category with highest month-to-month dollar range
-    # uses monthly totals (not per-transaction) — consistent with spending_impact approach
+    # category with highest month-to-month dollar range (ignoring income/transfer)
     if "category" in df_spend.columns and months_count >= 3:
-        cat_monthly = df_spend.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
+        expense_only = df_spend[~df_spend["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
+        cat_monthly = expense_only.groupby(["month", "category"])["amount"].sum().unstack(fill_value=0)
         if len(cat_monthly.columns) > 0:
             cat_range = cat_monthly.max() - cat_monthly.min()
             top_cat   = cat_range.idxmax()
@@ -110,20 +112,19 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
     else:
         spending_trend = "Insufficient data"
 
-    # income + savings rate
+    # income + savings rate (use original df for income since df_spend excludes it)
     monthly_income   = 0
-    monthly_spending = 0
+    monthly_spending = float(monthly.mean()) if months_count > 0 else 0
     savings_rate     = 0
 
-    if "category" in df_spend.columns:
-        spend_mask  = ~df_spend["category"].fillna("").str.lower().isin(["income", "transfer", ""])
-        income_mask = df_spend["category"].fillna("").str.lower() == "income"
+    if "category" in df.columns:
+        df_all = df.copy()
+        df_all["amount"] = df_all["amount"].abs()
+        df_all["date"] = pd.to_datetime(df_all["date"])
+        df_all["month"] = df_all["date"].dt.to_period("M")
+        income_mask = df_all["category"].fillna("").str.lower() == "income"
+        income_monthly = df_all[income_mask].groupby("month")["amount"].sum()
 
-        spend_monthly  = df_spend[spend_mask].groupby("month")["amount"].sum()
-        income_monthly = df_spend[income_mask].groupby("month")["amount"].sum()
-
-        if len(spend_monthly) > 0:
-            monthly_spending = float(spend_monthly.mean())
         if len(income_monthly) > 0:
             monthly_income = float(income_monthly.mean())
         if monthly_income > 0:
@@ -146,6 +147,19 @@ def _compute_spending_metrics(df: pd.DataFrame) -> dict:
 
 
 def profile_data(df: pd.DataFrame) -> dict:
+
+    if df.empty:
+        return {
+            "transaction_count": 0, "date_range_days": 0,
+            "category_count": 0, "categories": [], "has_income": False,
+            "start_date": "N/A", "end_date": "N/A",
+            "total_spent": 0, "monthly_totals": [], "months_count": 0,
+            "monthly_average": 0, "highest_month": {"amount": 0, "month": "N/A"},
+            "lowest_month": {"amount": 0, "month": "N/A"}, "recent_3mo_avg": 0,
+            "spending_trend": "Insufficient data",
+            "biggest_swing_category": {"name": "N/A", "min": 0, "max": 0},
+            "monthly_income": 0, "monthly_spending": 0, "savings_rate": 0,
+        }
 
     dates     = pd.to_datetime(df["date"])
     span_days = (dates.max() - dates.min()).days
@@ -235,8 +249,7 @@ def plan_analysis(profile: dict) -> dict:
     print(f"\nAgent plan: {enabled_count} tools enabled, {skipped_count} skipped")
     for t in tools:
         status = "✅" if t["enabled"] else "❌"
-        note   = f" → {t['reasoning']}" if t.get("reasoning") else ""
-        print(f"  {status} [{t.get('priority', '-')}] {t['name']:25} — {t['reason']}{note}")
+        print(f"  {status} [{t.get('priority', '-')}] {t['name']:25} — {t['reason']}")
 
     return {"tools": tools}
 
@@ -312,7 +325,8 @@ def execute_analysis_plan(df: pd.DataFrame, plan: dict, on_progress=None) -> dic
     emit("Running analysis tools...")
 
     # run all enabled tools in parallel — they're independent (read-only on df)
-    with ThreadPoolExecutor(max_workers=len(enabled_tools) or 1) as executor:
+    # cap at 4 to avoid thread starvation under gunicorn (1 worker, 4 threads)
+    with ThreadPoolExecutor(max_workers=min(len(enabled_tools) or 1, 4)) as executor:
         futures = {}
         for name in enabled_tools:
             label = TOOL_DISPLAY_NAMES.get(name, name)

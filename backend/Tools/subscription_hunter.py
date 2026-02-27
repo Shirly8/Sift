@@ -9,13 +9,16 @@ Find recurring charges, track price creep, detect subscription overlap
 """
 
 import pandas as pd
-import numpy as np
 
 
 
 ####################################
 # STEP 1: DETECT RECURRING CHARGES
 ####################################
+
+# categories where regular purchases are habits, not subscriptions
+HABIT_CATEGORIES = {"dining", "groceries", "delivery", "shopping", "transport"}
+
 
 def detect_recurring_charges(df: pd.DataFrame) -> list:
     """
@@ -24,24 +27,14 @@ def detect_recurring_charges(df: pd.DataFrame) -> list:
     Requires min 2 cycles to detect, 3+ for HIGH confidence
     """
 
-    # categories where recurring charges are genuine subscriptions/bills
-    # vs categories where regular purchases are just habits (e.g. weekly coffee)
-    SUBSCRIPTION_CATEGORIES = {
-        "subscriptions", "bills & utilities", "insurance", "rent & housing",
-        "education", "health",
-    }
-    # categories where regular purchases are habits, not subscriptions
-    HABIT_CATEGORIES = {"dining", "groceries", "delivery", "shopping", "transport"}
-
     results = []
-    dates   = pd.to_datetime(df["date"])
 
     for merchant, group in df.groupby("merchant"):
 
         if len(group) < 2:
             continue
 
-        group_dates   = pd.to_datetime(group["date"]).sort_values()
+        group_dates   = group["date"].sort_values()
         group_amounts = group["amount"].astype(float)
 
         # check if amounts are consistent (std < 35% of mean)

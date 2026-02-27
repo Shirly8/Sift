@@ -15,6 +15,8 @@ import json
 from datetime import datetime
 from filelock import FileLock
 
+from Categorization.constants import USER_VERIFIED_CONFIDENCE, CACHE_THRESHOLD
+
 
 DB_PATH = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
 _LOCK  = FileLock(DB_PATH + ".lock", timeout=5)
@@ -50,7 +52,7 @@ def lookup_merchant(merchant: str, db: dict = None) -> tuple:
         return None, 0.0, False
 
     # user-verified corrections always override
-    confidence = 0.99 if entry.get("user_verified") else entry.get("confidence", 0.8)
+    confidence = USER_VERIFIED_CONFIDENCE if entry.get("user_verified") else entry.get("confidence", CACHE_THRESHOLD)
 
     return entry["category"], confidence, entry.get("user_verified", False)
 
@@ -66,7 +68,7 @@ def update_from_user_correction(merchant: str, correct_category: str, db_path: s
 
     db[merchant.upper()] = {
         "category":      correct_category,
-        "confidence":    0.99,
+        "confidence":    USER_VERIFIED_CONFIDENCE,
         "last_verified": datetime.now().strftime("%Y-%m-%d"),
         "user_verified": True,
     }

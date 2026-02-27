@@ -27,7 +27,7 @@ def calculate_category_correlations(df: pd.DataFrame) -> list:
     Only report: |r| >= 0.4 AND FDR-adjusted p < 0.10
     """
 
-    dates = pd.to_datetime(df["date"])
+    dates = df["date"]
 
     # need 3+ months
     span_days = (dates.max() - dates.min()).days
@@ -36,7 +36,7 @@ def calculate_category_correlations(df: pd.DataFrame) -> list:
 
     # skip non-spending
     spend_df = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])].copy()
-    spend_df["month"] = pd.to_datetime(spend_df["date"]).dt.to_period("M")
+    spend_df["month"] = spend_df["date"].dt.to_period("M")
 
 
     # monthly totals per category

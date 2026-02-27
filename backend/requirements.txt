@@ -16,5 +16,4 @@ flask-cors>=4.0.0
 flask-limiter>=3.5.0
 python-dotenv>=1.0.0
 gunicorn>=21.0.0
-statsmodels
 filelock>=3.12.0

@@ -1,123 +1,139 @@
 'use client';
 
+import { useEffect, useState } from 'react';
 import AnimatedNumber from './AnimatedNumber';
-import Sparkline from './Sparkline';
 
 
-export default function MetricsRow({ profile = {}, savingsPotential = 0 }) {
+export default function MetricsRow({ profile = {}, savingsPotential = 0, topCategory }) {
 
   const totalSpent = profile.total_spent || 0;
-  const monthlyTotals = profile.monthly_totals || [];
   const monthsCount = profile.months_count || 0;
   const monthlyAvg = profile.monthly_average || 0;
   const biggestSwing = profile.biggest_swing_category || {};
   const spendingTrend = profile.spending_trend || '';
-  const highestMonth = profile.highest_month || {};
-  const lowestMonth = profile.lowest_month || {};
-  const monthlyIncome = profile.monthly_income || 0;
-  const savingsRate = profile.savings_rate || 0;
 
+  // Top spending category from parent
+  const topLabel = topCategory?.label || '';
+  const topAvg = topCategory?.avg || 0;
+  // Compute % of total monthly spending (not variance impact)
+  const topPct = monthlyAvg > 0 ? Math.round((topAvg / monthlyAvg) * 100) : 0;
+
+  // Trend arrow helper
+  const trendArrow = spendingTrend === 'Gradually rising' ? '\u2197'
+    : spendingTrend === 'Gradually declining' ? '\u2198'
+    : '\u2192';
+
+  const trendClass = spendingTrend === 'Gradually rising' ? 'trend--rising'
+    : spendingTrend === 'Gradually declining' ? 'trend--falling'
+    : 'trend--stable';
+
+  // Stagger animation
+  const [visible, setVisible] = useState(false);
+  useEffect(() => { requestAnimationFrame(() => setVisible(true)); }, []);
 
   return (
-    <div className="metrics-row-equal">
+    <div className={`metrics-hero ${visible ? 'metrics-hero--visible' : ''}`}>
 
-      {/* TOTAL SPENT */}
-      <div className="card">
-        <div className="card__accent" />
-        <span className="label">Total Spent</span>
-        <div className="flex items-baseline gap-1" style={{ marginTop: 6 }}>
-          <span className="num-hero">$<AnimatedNumber value={totalSpent} /></span>
-        </div>
+      {/* ── NARRATIVE HERO ── */}
+      <section className="metrics-hero__story">
         {monthsCount > 0 && (
-          <div className="text-sm ink-muted" style={{ marginTop: 8 }}>over {monthsCount} months</div>
+          <p className="metrics-hero__greeting">
+            Here&rsquo;s your {monthsCount}-month spending picture
+          </p>
         )}
-      </div>
 
-      {/* MONTHLY AVERAGE */}
-      <div className="card">
-        <span className="label">Monthly Average</span>
-        <div className="num-large" style={{ marginTop: 6 }}>$<AnimatedNumber value={monthlyAvg} /></div>
-        {monthlyTotals.length > 1 && (
-          <div style={{ marginTop: 8 }}><Sparkline data={monthlyTotals} color="#CF5532" /></div>
-        )}
-        {spendingTrend && spendingTrend !== 'Insufficient data' && (
-          <div className="flex items-center gap-1" style={{ marginTop: 6 }}>
-            <span style={{ fontSize: 12 }}>
-              {spendingTrend === 'Gradually rising' ? '\u2197' : spendingTrend === 'Gradually declining' ? '\u2198' : '\u2192'}
-            </span>
-            <span className="text-xs ink-soft">{spendingTrend}</span>
-          </div>
-        )}
-      </div>
+        <h1 className="metrics-hero__headline">
+          You spent{' '}
+          <span className="metrics-hero__amount">
+            $<AnimatedNumber value={totalSpent} />
+          </span>{' '}
+          total.
+          <br />
+          Here&rsquo;s where it all went.
+        </h1>
 
-      {/* BIGGEST SWING */}
-      {biggestSwing.name && (
-        <div className="card">
-          <div className="flex items-center gap-2">
-            <div className="dot dot--terra" />
-            <span className="label label--terra">Biggest Swing</span>
-            <span className="help-tip" data-tooltip="The category where your monthly spending changes the most">?</span>
-          </div>
-          <div className="fw-700 text-lg" style={{ marginTop: 8 }}>{biggestSwing.name}</div>
-          <div className="num-large" style={{ marginTop: 2 }}>${Math.round(biggestSwing.min)}&ndash;${Math.round(biggestSwing.max)}</div>
-          <div className="text-sm ink-muted" style={{ marginTop: 4 }}>per month range</div>
-        </div>
-      )}
+        <p className="metrics-hero__subtitle">
+          {topLabel && (
+            <>
+              Your biggest category is <strong>{topLabel}</strong> at ${topAvg}/mo
+              {spendingTrend && spendingTrend !== 'Insufficient data' && (
+                <>, and your spending has been {spendingTrend.toLowerCase()}</>
+              )}
+              .{' '}
+            </>
+          )}
+          {savingsPotential > 0 && (
+            <>
+              The good news? We found about{' '}
+              <strong>${savingsPotential.toLocaleString()}/year</strong> you could save.
+            </>
+          )}
+        </p>
 
-      {/* COULD SAVE — computed from all detected opportunities */}
-      {savingsPotential > 0 && (
-        <div className="card">
-          <div className="flex items-center gap-2">
-            <div className="dot dot--sage" />
-            <span className="label label--sage">Could Save</span>
-          </div>
-          <div className="flex items-baseline gap-2" style={{ marginTop: 8 }}>
-            <span className="num-large ink-sage">$<AnimatedNumber value={savingsPotential} /></span>
-            <span className="text-sm ink-muted">/ year</span>
-          </div>
-          <div className="text-sm ink-muted" style={{ marginTop: 4 }}>across all opportunities</div>
-        </div>
-      )}
+      </section>
 
-      {/* SAVINGS RATE — only if income detected */}
-      {monthlyIncome > 0 && (
-        <div className="card">
-          <div className="flex items-center gap-2">
-            <div className="dot dot--sage" />
-            <span className="label label--sage">Savings Rate</span>
-          </div>
-          <div className="num-hero ink-sage" style={{ marginTop: 6 }}>{savingsRate}%</div>
-          <div className="text-sm ink-muted" style={{ marginTop: 8 }}>
-            ${Math.round(monthlyIncome).toLocaleString()}/mo income
-          </div>
-          <div className="text-sm ink-muted" style={{ marginTop: 2 }}>
-            ${Math.round(monthlyIncome - (profile.monthly_spending || monthlyAvg)).toLocaleString()}/mo saved
-          </div>
-        </div>
-      )}
 
-      {/* HIGH / LOW MONTHS — show when no savings card */}
-      {savingsPotential === 0 && highestMonth.month && lowestMonth.month && (
-        <div className="card">
-          <span className="label">Spending Range</span>
-          <div style={{ marginTop: 8 }}>
-            <div className="flex justify-between items-baseline" style={{ marginBottom: 6 }}>
-              <span className="text-sm fw-600">{highestMonth.month}</span>
-              <span className="text-md fw-700" style={{ color: 'var(--terra)' }}>
-                ${highestMonth.amount?.toLocaleString()}
-              </span>
+      {/* ── SUMMARY CARDS ── */}
+      <section className="summary-row">
+
+        {/* Monthly Average */}
+        <div className="card card--summary">
+          <div className="summary-card__accent summary-card__accent--terra" />
+          <span className="summary-card__label label-upper">Monthly Average</span>
+          <div className="summary-card__value serif-num">
+            $<AnimatedNumber value={monthlyAvg} />
+          </div>
+          {spendingTrend && spendingTrend !== 'Insufficient data' && (
+            <div className={`summary-card__context ${trendClass}`}>
+              <span className="summary-card__trend-arrow">{trendArrow}</span>
+              {spendingTrend}
             </div>
-            <div className="flex justify-between items-baseline">
-              <span className="text-sm fw-600">{lowestMonth.month}</span>
-              <span className="text-md fw-700" style={{ color: 'var(--sage)' }}>
-                ${lowestMonth.amount?.toLocaleString()}
-              </span>
+          )}
+        </div>
+
+        {/* Where You Spend Most */}
+        {topLabel && (
+          <div className="card card--summary">
+            <div className="summary-card__accent summary-card__accent--sage" />
+            <span className="summary-card__label label-upper">Where You Spend Most</span>
+            <div className="summary-card__value summary-card__value--text serif-num">{topLabel}</div>
+            <div className="summary-card__context">
+              ${topAvg}/mo &middot; {topPct}% of your spending
             </div>
           </div>
-          <div className="text-xs ink-muted" style={{ marginTop: 6 }}>highest vs lowest month</div>
-        </div>
-      )}
+        )}
 
+        {/* Fluctuates Most */}
+        {biggestSwing.name && biggestSwing.name !== 'N/A' && (
+          <div className="card card--summary">
+            <div className="summary-card__accent summary-card__accent--amber" />
+            <span className="summary-card__label label-upper">Fluctuates Most</span>
+            <div className="summary-card__value summary-card__value--text serif-num">{biggestSwing.name}</div>
+            <div className="summary-card__context">
+              Some months ${Math.round(biggestSwing.min)}, others up to ${Math.round(biggestSwing.max)}
+            </div>
+          </div>
+        )}
+
+        {/* Could Save */}
+        <div className="card card--summary">
+          <div className="summary-card__accent summary-card__accent--rose" />
+          <span className="summary-card__label label-upper">You Could Save</span>
+          <div className="summary-card__value serif-num">
+            {savingsPotential > 0
+              ? <><span className="ink-sage">$<AnimatedNumber value={savingsPotential} /></span></>
+              : <span className="ink-muted">&mdash;</span>
+            }
+          </div>
+          <div className="summary-card__context">
+            {savingsPotential > 0
+              ? <><span className="trend--falling">&#8595; per year</span> across all opportunities</>
+              : 'No opportunities detected yet'
+            }
+          </div>
+        </div>
+
+      </section>
     </div>
   );
 }

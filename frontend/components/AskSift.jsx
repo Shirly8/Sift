@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useRef } from 'react';
+import SafeText from './SafeText';
 
 
 // suggested questions
@@ -10,23 +11,6 @@ const CHIPS = [
   { label: 'Do I spend more after payday?', q: 'Do I spend more after payday?' },
   { label: 'Where can I cut back?', q: 'Where can I cut back?' },
 ];
-
-
-// Fix #3: Safe text renderer — parses **bold** and newlines without dangerouslySetInnerHTML
-function SafeText({ text }) {
-  if (!text) return null;
-
-  // split on **bold** markers and double newlines
-  const parts = text.split(/(\*\*[^*]+\*\*|\n\n)/g);
-
-  return parts.map((part, i) => {
-    if (part.startsWith('**') && part.endsWith('**')) {
-      return <strong key={i}>{part.slice(2, -2)}</strong>;
-    }
-    if (part === '\n\n') return <br key={i} />;
-    return <span key={i}>{part}</span>;
-  });
-}
 
 
 export default function AskSift({ sessionId }) {
@@ -39,7 +23,6 @@ export default function AskSift({ sessionId }) {
   const [toolLabel, setToolLabel] = useState('');
   const [toolDone, setToolDone] = useState(false);
   const [confidence, setConfidence] = useState(null);
-  const [methodology, setMethodology] = useState(null);
   const responseRef = useRef(null);
 
 
@@ -51,13 +34,12 @@ export default function AskSift({ sessionId }) {
     setResponse(null);
     setToolDone(false);
     setConfidence(null);
-    setMethodology(null);
     setTyping(true);
     setShowCursor(false);
 
     try {
       // call backend /api/ask
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ask`, {
+      const res = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/ask`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -66,12 +48,12 @@ export default function AskSift({ sessionId }) {
         }),
       });
 
-      if (!response.ok) {
-        const error = await response.json();
+      if (!res.ok) {
+        const error = await res.json();
         throw new Error(error.error || 'Request failed');
       }
 
-      const data = await response.json();
+      const data = await res.json();
 
       // show tool result immediately — no artificial delays
       setToolLabel(data.tool_used || 'analysis');
@@ -94,7 +76,6 @@ export default function AskSift({ sessionId }) {
       setShowCursor(false);
       setResponse(built);
       setConfidence(data.confidence || null);
-      setMethodology(data.methodology || null);
 
     } catch (err) {
       console.error('Ask error:', err);
@@ -156,7 +137,7 @@ export default function AskSift({ sessionId }) {
             {!toolDone ? (
               <div className="spinner" style={{ width: 14, height: 14, borderWidth: '1.5px' }} />
             ) : (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#2D7A2D" strokeWidth="2.5" strokeLinecap="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--sage-dark)" strokeWidth="2.5" strokeLinecap="round">
                 <path d="M5 12l5 5L20 7" />
               </svg>
             )}
@@ -182,14 +163,11 @@ export default function AskSift({ sessionId }) {
                   padding: '2px 8px',
                   borderRadius: 4,
                   background: confidence === 'HIGH' ? 'rgba(45,122,45,0.12)' : confidence === 'MEDIUM' ? 'rgba(200,150,0,0.12)' : 'rgba(200,60,60,0.12)',
-                  color: confidence === 'HIGH' ? '#2D7A2D' : confidence === 'MEDIUM' ? '#9A7B00' : '#C03C3C',
+                  color: confidence === 'HIGH' ? 'var(--sage-dark)' : confidence === 'MEDIUM' ? 'var(--amber)' : 'var(--rose)',
                 }}
               >
-                {confidence} confidence
+                {confidence === 'HIGH' ? 'Seen consistently in your data' : confidence === 'MEDIUM' ? 'Likely based on your history' : 'Based on limited data'}
               </span>
-              {methodology && (
-                <span className="text-xs ink-faint">{methodology}</span>
-              )}
             </div>
           )}
         </div>

@@ -18,15 +18,11 @@ to run on their actual data, executes them, then explains the results.
 """
 
 import json
-import hashlib
-from collections import OrderedDict
 import pandas as pd
 
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from LLM.client       import call_llm, extract_json
-from Tools.simulator  import run_projection, stress_test, calculate_runway
+from Tools.simulator  import run_projection, stress_test
+from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
 
 
 
@@ -91,7 +87,8 @@ def ask(question: str, df: pd.DataFrame, analysis_results: dict = None) -> dict:
     tool_name = routing.get("tool", "general")
     params    = routing.get("params", {})
 
-    print(f"Agent routing: '{question[:50]}...' -> {tool_name}({params})")
+    q_preview = question[:50] + ('...' if len(question) > 50 else '')
+    print(f"Agent routing: '{q_preview}' -> {tool_name}({params})")
 
     # broad questions: run multi_analyze directly (no LLM chain planning call)
     # multi_analyze already breaks down top categories + runs what-if — the extra
@@ -141,7 +138,7 @@ DATA AVAILABLE:
 
 {TOOLS_DESCRIPTION}"""
 
-    raw = call_llm(prompt, temperature=0.0, max_tokens=200)
+    raw = call_llm(prompt, temperature=0.0, max_tokens=300)
 
     try:
         return json.loads(extract_json(raw))
@@ -404,9 +401,7 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
     # use total data span (not just active months) so the monthly average
     # reflects reality — a category with $300 across 3 months out of 12
     # is $25/mo annualized, not $100/mo
-    all_dates      = pd.to_datetime(df["date"])
-    span_months    = max(1, round((all_dates.max() - all_dates.min()).days / 30.44))
-    months_in_data = span_months
+    months_in_data = max(1, round((df["date"].max() - df["date"].min()).days / 30.44))
 
     current_monthly = current_total / months_in_data
     reduced_monthly = current_monthly * (1 - cut_pct / 100)
@@ -433,8 +428,23 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
 def _general_summary(df: pd.DataFrame, analysis_results: dict = None) -> dict:
     """
     Fallback: return a data summary for general questions.
+    Reuses the pre-computed profile from analysis_results when available
+    to avoid redundant computation.
     """
 
+    # reuse existing profile if analysis already ran
+    if analysis_results and analysis_results.get("profile"):
+        profile = analysis_results["profile"]
+        return {
+            "total_transactions": profile.get("transaction_count", len(df)),
+            "total_spending":     round(profile.get("monthly_spending", 0) * profile.get("months_count", 1), 2),
+            "date_range":         f"{profile.get('start_date', 'N/A')} to {profile.get('end_date', 'N/A')}",
+            "monthly_average":    round(profile.get("monthly_average", 0), 2),
+            "spending_trend":     profile.get("spending_trend", "Unknown"),
+            "insights_available": len(analysis_results.get("insights", [])),
+        }
+
+    # fallback: compute from raw data
     dates = pd.to_datetime(df["date"])
     spend = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
 
@@ -446,7 +456,7 @@ def _general_summary(df: pd.DataFrame, analysis_results: dict = None) -> dict:
         "total_spending":     round(float(spend["amount"].sum()), 2),
         "date_range":         f"{dates.min().date()} to {dates.max().date()}",
         "top_categories":     top_cats,
-        "insights_available": len(analysis_results.get("insights", [])) if analysis_results else 0,
+        "insights_available": 0,
     }
 
 
@@ -493,7 +503,7 @@ def _execute_tool(tool_name: str, df: pd.DataFrame, params: dict, analysis_resul
 
 
 ####################################
-# STEP 6: MULTI-TOOL ANALYSIS (fallback for when chain planning fails)
+# STEP 6: MULTI-TOOL ANALYSIS
 ####################################
 
 def _multi_analyze(df: pd.DataFrame, analysis_results: dict = None) -> dict:
@@ -505,23 +515,28 @@ def _multi_analyze(df: pd.DataFrame, analysis_results: dict = None) -> dict:
     spend  = df[~df["category"].fillna("").str.lower().isin(["income", "transfer", ""])]
     by_cat = spend.groupby("category")["amount"].sum().sort_values(ascending=False)
 
-    discretionary = {"dining", "delivery", "shopping", "entertainment", "personal care"}
-
     categories = []
+
+    # first pass: prioritize discretionary categories (most actionable)
     for cat in by_cat.index:
-        if cat.lower() not in discretionary:
+        if cat.lower() not in DISCRETIONARY_CATEGORIES:
             continue
         if len(categories) >= 3:
             break
-
         breakdown = _breakdown_category(df, cat)
         what_if   = _spending_what_if(df, cat, 20)
+        categories.append({"category": cat, "breakdown": breakdown, "what_if": what_if})
 
-        categories.append({
-            "category":  cat,
-            "breakdown": breakdown,
-            "what_if":   what_if,
-        })
+    # second pass: if fewer than 3 discretionary, fill with non-essential categories
+    if len(categories) < 3:
+        for cat in by_cat.index:
+            if cat.lower() in ESSENTIAL_CATEGORIES or cat.lower() in DISCRETIONARY_CATEGORIES:
+                continue
+            if len(categories) >= 3:
+                break
+            breakdown = _breakdown_category(df, cat)
+            what_if   = _spending_what_if(df, cat, 20)
+            categories.append({"category": cat, "breakdown": breakdown, "what_if": what_if})
 
     result = {"categories": categories}
 
@@ -613,21 +628,8 @@ Respond in plain text. Be direct, specific, and actionable."""
 # STEP 8: DATA SUMMARY FOR ROUTING
 ####################################
 
-_summary_cache     = OrderedDict()  # keyed by content hash, capped at 20
-_SUMMARY_CACHE_MAX = 20
-
 def _build_data_summary(df: pd.DataFrame) -> str:
-    """
-    Compact summary of available data so the LLM knows what tools can work with.
-    Cached per DataFrame content to avoid recomputing on every /api/ask call.
-    """
-
-    # content-based hash: len + first/last dates + total amount
-    h = hashlib.md5(f"{len(df)}:{df['date'].iloc[0]}:{df['date'].iloc[-1]}:{df['amount'].sum():.2f}".encode()).hexdigest()
-
-    if h in _summary_cache:
-        _summary_cache.move_to_end(h)
-        return _summary_cache[h]
+    """Compact summary of available data so the LLM knows what tools can work with."""
 
     dates      = pd.to_datetime(df["date"])
     categories = df["category"].dropna().unique().tolist() if "category" in df.columns else []
@@ -635,18 +637,12 @@ def _build_data_summary(df: pd.DataFrame) -> str:
     # top 20 merchants by frequency
     top_merchants = df["merchant"].value_counts().head(20).index.tolist() if "merchant" in df.columns else []
 
-    summary = (
+    return (
         f"Transactions: {len(df)}\n"
         f"Date range: {dates.min().date()} to {dates.max().date()}\n"
         f"Categories: {', '.join(categories)}\n"
         f"Top merchants: {', '.join(top_merchants)}"
     )
-
-    _summary_cache[h] = summary
-    if len(_summary_cache) > _SUMMARY_CACHE_MAX:
-        _summary_cache.popitem(last=False)
-
-    return summary
 
 
 

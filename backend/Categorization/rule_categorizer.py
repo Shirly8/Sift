@@ -4,7 +4,6 @@ Before LLM fallback, see if we can classify ourselves
   categorize_merchant("STARBUCKS", rules)  ->  ("Dining", 0.95)
   categorize_merchant("XYZ CORP", rules)   ->  (None, 0.0)   <- falls through to LLM
 
-ED
   batch_categorize(merchants, rules)
   -> Rule categorization: 262/280 merchants (94% coverage)
 """
@@ -13,6 +12,8 @@ import re
 import json
 import pandas as pd
 from pathlib import Path
+
+from Categorization.constants import RULE_EXACT_CONFIDENCE, RULE_WORD_CONFIDENCE, RULE_SUBSTRING_CONFIDENCE
 
 
 _RULES_PATH = Path(__file__).parent / "rules.json"
@@ -52,15 +53,15 @@ def categorize_merchant(merchant: str, rules: dict) -> tuple:
 
             # exact match
             if m_norm == kw_norm:
-                return category, 0.95
+                return category, RULE_EXACT_CONFIDENCE
 
             # whole-word match
             if re.search(r'\b' + re.escape(kw_norm) + r'\b', m_norm):
-                return category, 0.80
+                return category, RULE_WORD_CONFIDENCE
 
             # substring match
             if kw_norm in m_norm:
-                return category, 0.70
+                return category, RULE_SUBSTRING_CONFIDENCE
 
     return None, 0.0
 
@@ -89,6 +90,6 @@ def batch_categorize(merchants: list, rules: dict) -> pd.DataFrame:
     print(f"Rule categorization: {categorized}/{len(df)} merchants ({coverage:.0%} coverage)")
 
     if coverage < 0.4:
-        print("Warning: Low rule coverage — LLM fallback will be heavy")
+        print("Warning: Low rule coverage. LLM fallback will be heavy")
 
     return df

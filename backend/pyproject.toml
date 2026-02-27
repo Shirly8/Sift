@@ -1,0 +1,13 @@
+[project]
+name = "sift-backend"
+version = "1.0.0"
+description = "Spending intelligence agent — agentic analysis of bank transaction data"
+requires-python = ">=3.10"
+
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["Agent*", "Categorization*", "Ingestion*", "LLM*", "Tools*"]

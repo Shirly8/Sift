@@ -41,7 +41,7 @@ const SPENDING_BARS = [
 const INSIGHTS = [
     { rank: 1, impact: '$2,250/yr', tag: 'high', tagLabel: 'Reliable', title: '8 active subscriptions at $187/mo', desc: 'Netflix has increased 43.7% since you subscribed. Three streaming services overlap at $53/mo.' },
     { rank: 2, impact: '$1,440/yr', tag: 'high', tagLabel: 'Reliable', title: 'Payday spending concentration', desc: '40% of discretionary budget spent within 3 days of deposit, 9 of 11 months.' },
-    { rank: 3, impact: '$960/yr', tag: 'med', tagLabel: 'Likely', title: 'Groceries ↔ Delivery inverse', desc: 'When grocery spending rises, delivery drops proportionally (r = −0.72).' },
+    { rank: 3, impact: '$960/yr', tag: 'med', tagLabel: 'Likely', title: 'Groceries ↔ Delivery inverse', desc: 'When grocery spending rises, delivery drops proportionally — a strong, consistent pattern.' },
 ];
 
 // philosophy table rows
@@ -139,6 +139,11 @@ export default function StartPage({ onUpload }) {
                     });
                 }
 
+                // ghost transaction list — add system-visible after visible
+                if (type === 'ghost') {
+                    setTimeout(() => { el.classList.add('system-visible'); }, 600);
+                }
+
                 obs.unobserve(e.target);
             });
         }, { threshold: 0.25 });
@@ -221,7 +226,7 @@ export default function StartPage({ onUpload }) {
                 </div>
 
                 {/* ghost transaction list */}
-                <div className="prov-ghost visible system-visible">
+                <div className="prov-ghost reveal" data-animate="ghost">
                     <div className="prov-ghost__header">
                         <span>Recent Transactions</span>
                         <span>Amount</span>
@@ -244,7 +249,7 @@ export default function StartPage({ onUpload }) {
 
             {/* ====== THESIS ====== */}
             <section className="thesis">
-                <div className="thesis__label reveal">The idea</div>
+                <div className="section-label reveal">The idea</div>
                 <p className="thesis__text reveal">
                     Understanding your finances is personal. Where you spend, why you spend, what
                     trade-offs feel right — <strong>that will always be human.</strong>
@@ -269,7 +274,7 @@ export default function StartPage({ onUpload }) {
             <section className="pattern">
                 <div className="pattern__stat reveal">
                     <div className="pattern__stat-number">&minus;0.72</div>
-                    <div className="pattern__stat-unit">Pearson correlation</div>
+                    <div className="pattern__stat-unit">Spending correlation</div>
                     <div className="pattern-viz" data-animate="svg-lines">
                         <svg width="200" height="80" viewBox="0 0 200 80" fill="none">
                             <polyline points="0,60 30,52 60,48 90,38 120,30 150,22 180,18 200,12"
@@ -285,11 +290,11 @@ export default function StartPage({ onUpload }) {
                     </div>
                 </div>
                 <div className="pattern__text reveal">
-                    <div className="pattern__label">Cross-category correlation</div>
-                    <div className="pattern__title">Groceries and delivery move inversely</div>
+                    <div className="pattern__label">Spending connection</div>
+                    <div className="pattern__title">Groceries and delivery move in opposite directions</div>
                     <div className="pattern__desc">
                         When one rises $80, the other drops $60. Cook more in a month, save roughly $80.
-                        Nobody reads their bank statement as a correlation matrix. Sift can.
+                        Nobody spots these patterns by scrolling a bank statement. Sift can.
                     </div>
                 </div>
             </section>
@@ -405,7 +410,7 @@ export default function StartPage({ onUpload }) {
 
             {/* ====== DASHBOARD PREVIEW ====== */}
             <section className="preview-section">
-                <div className="preview-label reveal">What you see</div>
+                <div className="section-label reveal">What you see</div>
 
                 <div className="dashboard-frame reveal" data-animate="dash">
 
@@ -492,7 +497,7 @@ export default function StartPage({ onUpload }) {
 
             {/* ====== PIPELINE ====== */}
             <section className="pipeline">
-                <div className="pipeline__label">How the agent works</div>
+                <div className="section-label">How the agent works</div>
 
                 <div
                     className={`pipeline__flow ${flowVisible ? 'flow-visible' : ''}`}
@@ -521,7 +526,7 @@ export default function StartPage({ onUpload }) {
 
             {/* ====== AGENT LOG ====== */}
             <section className="agent-log">
-                <div className="agent-log__label">Agent decision log</div>
+                <div className="section-label">Agent decision log</div>
                 <div className="agent-log__grid">
 
                     {/* log entries */}

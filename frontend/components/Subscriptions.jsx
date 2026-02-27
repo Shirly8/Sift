@@ -72,7 +72,7 @@ export default function Subscriptions({ subscriptions }) {
                   </span></>
                 )}
                 {s.overlap && (
-                  <> &middot; <span style={{ color: '#2B6CB0' }}>
+                  <> &middot; <span style={{ color: 'var(--blue)' }}>
                     {s.overlap} ({s.overlapCount} subs)
                   </span></>
                 )}

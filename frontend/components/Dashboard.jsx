@@ -15,6 +15,11 @@ import Anomalies from './Anomalies';
 import FinancialResilience from './FinancialResilience';
 import UploadModal from './UploadModal';
 import Toast from './Toast';
+import {
+  buildSpendingBars, buildTrendData, buildPatternCards,
+  buildSubscriptions, buildHabitsData, buildInsights,
+  buildAnomalies, buildResilience,
+} from './transformers';
 
 
 // Error boundary — prevents full-page crash from any child component error
@@ -169,20 +174,15 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
   // SpendingHabits: build from temporal_patterns results
   const habitsData = buildHabitsData(results);
 
-  // InsightCards: map backend field names to frontend props
   const insightsData = buildInsights(analysisData?.insights);
 
-  // Anomalies: build from anomaly_detection results
   const anomalyData = buildAnomalies(results);
 
-  // FinancialResilience: stress test + runway from simulator
   const resilienceData = buildResilience(results);
 
-  // Savings plan: concrete opportunities from backend
   const savingsPlan = analysisData?.savings_plan || null;
 
-  // Compute annual savings potential — uses deduplicated savings_plan to avoid double-counting
-  const savingsPotential = computeSavingsPotential(results, analysisData?.insights, savingsPlan);
+  const savingsPotential = Math.round(analysisData?.savings_potential ?? 0);
 
 
   return (
@@ -301,7 +301,7 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
 
         {/* METRICS ROW */}
         <div style={fadeIn(0.1)}>
-          <MetricsRow profile={analysisData?.profile} savingsPotential={savingsPotential} />
+          <MetricsRow profile={analysisData?.profile} savingsPotential={savingsPotential} topCategory={spendingBarsData?.[0]} />
         </div>
 
 
@@ -336,7 +336,10 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
           {activeTab === 'overview' && (
             <>
               <div className="bento-row bento-row--wide bento-row--stretch">
-                <SpendingBars categories={spendingBarsData} />
+                <div className="bento-stack">
+                  <SpendingBars categories={spendingBarsData} />
+                  <PatternCards patterns={patternData} />
+                </div>
                 <InsightCards insights={insightsData} />
               </div>
               <div className="bento-row bento-row--wide">
@@ -344,10 +347,7 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
                   <TrendChart categories={trendData.categories} months={trendData.months} />
                   <Subscriptions subscriptions={subscriptionData} />
                 </div>
-                <div className="bento-stack">
-                  <PatternCards patterns={patternData} />
-                  <SavingsPlan plan={savingsPlan} />
-                </div>
+                <SavingsPlan plan={savingsPlan} />
               </div>
             </>
           )}
@@ -377,237 +377,4 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
     </div>
     </ErrorBoundary>
   );
-}
-
-
-// ─── Data transformers: analysis results → component props ───
-
-const CATEGORY_COLORS = {
-  'Dining':            '#CF5532',
-  'Groceries':         '#6B8F71',
-  'Shopping':          '#D4915E',
-  'Transport':         '#7B8794',
-  'Subscriptions':     '#D4735A',
-  'Delivery':          '#C4A87A',
-  'Entertainment':     '#A8B0A0',
-  'Health':            '#5B8C85',
-  'Bills & Utilities': '#8B7355',
-  'Personal Care':     '#B5838D',
-  'Education':         '#6C757D',
-  'Insurance':         '#9B8EC5',
-  'Rent & Housing':    '#7A6C5D',
-};
-
-function getCategoryColor(name, idx) {
-  return CATEGORY_COLORS[name] || ['#CF5532','#6B8F71','#D4915E','#7B8794','#D4735A','#C4A87A','#A8B0A0'][idx % 7];
-}
-
-
-function buildInsights(rawInsights) {
-  if (!rawInsights || !rawInsights.length) return undefined;
-
-  return rawInsights.map((ins, idx) => ({
-    rank:       idx + 1,
-    impact:     ins.dollar_impact || 0,
-    confidence: ins.confidence || 'MEDIUM',
-    title:      ins.title || '',
-    desc:       ins.description || '',
-    extra:      ins.action_option || '',
-    source:     ins.tool_source || '',
-  }));
-}
-
-
-function buildSpendingBars(results) {
-  const impact = results.spending_impact;
-  if (!impact?.model_valid || !impact?.impacts) return undefined;
-
-  const impacts = impact.impacts;
-  if (!impacts.length) return undefined;
-
-  // sort by monthly_avg descending so bars show actual spending rank
-  const sorted = [...impacts].sort((a, b) => (b.monthly_avg || 0) - (a.monthly_avg || 0));
-
-  return sorted.slice(0, 7).map((imp, i) => ({
-    label:      imp.category,
-    avg:        Math.round(imp.monthly_avg || 0),
-    range:      `\u00B1$${Math.round(imp.monthly_std)}`,
-    color:      getCategoryColor(imp.category, i),
-    pct:        Math.round(imp.impact_pct),
-    varianceTag: `${Math.round(imp.impact_pct)}% of variance`,
-    tip:        `${imp.category}: ~$${Math.round(imp.monthly_avg || 0)}/mo avg, ${imp.impact_pct}% of your spending variance.`,
-  }));
-}
-
-
-function buildTrendData(results, profile) {
-  const monthlyTotals = profile.monthly_totals;
-  if (!monthlyTotals || monthlyTotals.length < 2) return { categories: undefined, months: undefined };
-
-  const startDate = profile.start_date ? new Date(profile.start_date) : new Date();
-  const months = monthlyTotals.map((_, i) => {
-    const d = new Date(startDate);
-    d.setMonth(d.getMonth() + i);
-    return d.toLocaleString('default', { month: 'short' });
-  });
-
-  const seasonal = results.temporal_patterns?.seasonal;
-  if (seasonal?.seasonal_detected && seasonal?.monthly_totals) {
-    const values = Object.values(seasonal.monthly_totals);
-    const labels = Object.keys(seasonal.monthly_totals).map(m => m.split(' ')[0].slice(0, 3));
-
-    return {
-      months: labels,
-      categories: [
-        { name: 'Total', color: '#CF5532', data: values },
-      ],
-    };
-  }
-
-  return {
-    months,
-    categories: [
-      { name: 'Total', color: '#CF5532', data: monthlyTotals },
-    ],
-  };
-}
-
-
-function buildPatternCards(results) {
-  const correlations = results.correlation_engine;
-  if (!correlations || !Array.isArray(correlations) || correlations.length === 0) return undefined;
-
-  // temporal context for "why" explanations
-  const temporal = results.temporal_patterns || {};
-  const payday   = temporal.payday || {};
-  const weekly   = temporal.weekly || {};
-
-  return correlations.slice(0, 3).map(corr => {
-    const a = corr.category_a;
-    const b = corr.category_b;
-    const positive = corr.correlation > 0;
-    const strength = corr.confidence === 'HIGH' ? 'strongly' : 'often';
-
-    // base description
-    let desc = positive
-      ? `When you spend more on **${a}**, **${b}** tends to go up too — they ${strength} move together.`
-      : `When **${a}** goes up, **${b}** tends to drop — they ${strength} move in opposite directions.`;
-
-    // add "why" from temporal data
-    const cats = [a.toLowerCase(), b.toLowerCase()];
-    const weekendCats = ['dining', 'entertainment', 'shopping', 'delivery'];
-    const paydayCats  = ['dining', 'shopping', 'personal care', 'delivery', 'entertainment'];
-
-    if (payday.payday_detected && cats.some(c => paydayCats.includes(c))) {
-      desc += ` Both tend to spike in the first week after payday (${payday.spending_in_first_7_days_pct}% of spending happens then).`;
-    } else if (weekly.weekend_spending_multiple > 1.3 && cats.some(c => weekendCats.includes(c))) {
-      desc += ` Both are weekend-heavy categories — weekends run ${weekly.weekend_spending_multiple}x weekday spending.`;
-    }
-
-    return {
-      emoji:         positive ? '\u{1F4C8}' : '\u{1F504}',
-      title:         `${a} & ${b}`,
-      desc,
-      strength:      corr.confidence === 'HIGH' ? 'Strong pattern' : 'Moderate',
-      strengthClass: corr.confidence === 'HIGH' ? 'tag--high' : 'tag--medium',
-      direction:     positive ? 'correlated' : 'inverse',
-    };
-  });
-}
-
-
-function buildSubscriptions(results) {
-  const subs = results.subscription_hunter;
-  if (!subs?.recurring || subs.recurring.length === 0) return undefined;
-
-  const priceCreepMap = {};
-  if (subs.price_creep) {
-    subs.price_creep.forEach(pc => {
-      if (pc.price_creep_detected) priceCreepMap[pc.merchant] = pc;
-    });
-  }
-
-  const overlapMap = {};
-  if (subs.overlaps) {
-    subs.overlaps.forEach(o => {
-      overlapMap[o.category] = o;
-    });
-  }
-
-  return subs.recurring.map((r, i) => {
-    const creepData = priceCreepMap[r.merchant];
-    const overlapData = overlapMap[r.category];
-
-    return {
-      name:          r.merchant,
-      amount:        r.amount,
-      annualCost:    r.annual_cost,
-      frequency:     r.frequency,
-      color:         getCategoryColor(r.category, i),
-      creep:         !!creepData,
-      creepPct:      creepData ? Math.round(creepData.total_increase_pct) : 0,
-      creepFrom:     creepData?.original_price,
-      creepTo:       creepData?.current_price,
-      overlap:       overlapData ? r.category : null,
-      overlapCount:  overlapData?.count || 0,
-      history:       creepData?.price_history?.map(p => p.amount) || [r.amount],
-    };
-  });
-}
-
-
-function buildHabitsData(results) {
-  const temporal = results.temporal_patterns;
-  if (!temporal) return undefined;
-
-  return {
-    payday: temporal.payday || {},
-    weekly: temporal.weekly || {},
-  };
-}
-
-
-function buildAnomalies(results) {
-  const anomalies = results.anomaly_detection;
-  if (!anomalies) return undefined;
-
-  const outliers = anomalies.outliers || [];
-  const spikes = anomalies.spending_spikes || [];
-  const newMerchants = anomalies.new_merchants || [];
-
-  if (outliers.length === 0 && spikes.length === 0 && newMerchants.length === 0) return undefined;
-
-  return { outliers, spikes, newMerchants };
-}
-
-
-function buildResilience(results) {
-  const resilience = results.financial_resilience;
-  if (!resilience?.runway || !resilience?.stress_test) return undefined;
-  return resilience;
-}
-
-
-function computeSavingsPotential(results, insights, savingsPlan) {
-  // use the deduplicated savings_plan from backend — avoids double-counting
-  // between subscription overlaps, price creep, insights, and spike excess
-  if (savingsPlan?.total_annual_savings) {
-    return Math.round(savingsPlan.total_annual_savings);
-  }
-
-  // fallback: simple sum if savings_plan wasn't generated
-  let savings = 0;
-
-  const subs = results.subscription_hunter;
-  if (subs?.overlaps) {
-    savings += subs.overlaps.reduce((sum, o) => sum + (o.potential_savings || 0), 0);
-  }
-
-  if (subs?.price_creep) {
-    savings += subs.price_creep
-      .filter(pc => pc.price_creep_detected)
-      .reduce((sum, pc) => sum + (pc.annual_cost_increase || 0), 0);
-  }
-
-  return Math.round(savings);
 }

@@ -12,21 +12,20 @@ E.g. payday spike + dining is top variance driver = post-payday dining is the sw
 """
 
 import json
-import sys, os
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+import pandas as pd
+
 from LLM.client import call_llm, extract_json
+from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
 
 
-# words that should NEVER appear in insights — expanded to catch subtle judgment
+# words that should NEVER appear in insights — expanded to catch subtle judgment + jargon
 BANNED_WORDS = [
     "should", "bad", "problem", "waste", "too much", "excessive",
     "avoid", "excess", "splurge", "cut back", "habit", "frequent",
     "overspend", "reckless", "irresponsible", "guilty", "alarming",
+    "variance", "standard deviation", "coefficient", "regression",
+    "percentile", "volatility", "burn rate",
 ]
-
-# categories the AI must never suggest cutting — the AI sees numbers, not context
-ESSENTIAL_CATEGORIES = {"groceries", "grocery", "rent", "mortgage", "healthcare",
-                        "medical", "insurance", "utilities", "childcare", "education"}
 
 
 
@@ -44,52 +43,147 @@ def synthesize_insights(tool_results: dict, profile: dict, llm_call=None) -> lis
 
     cross_refs = _cross_reference(tool_results)
 
-    # only call LLM if cross-refs didn't find enough patterns
-    if len(cross_refs) < 2:
+    # supplement with LLM — tell it what topics are already covered so it generates NEW ones
+    if len(cross_refs) < 6:
+        existing_topics = set()
+        for ins in cross_refs:
+            existing_topics.update(_extract_insight_keys(
+                f"{ins.get('title', '')} {ins.get('description', '')}".lower()
+            ))
         fn = llm_call or call_llm
-        llm_insights = _synthesize_with_llm(tool_results, profile, fn)
+        llm_insights = _synthesize_with_llm(tool_results, profile, fn, avoid_topics=existing_topics)
         cross_refs.extend(llm_insights)
 
     insights = _fact_check_dollar_impacts(cross_refs, tool_results)
     insights = _deduplicate_insights(insights)
 
-    return rank_insights_by_impact(insights)
+    return rank_insights_by_impact(insights)[:5]
 
 
 
-def _synthesize_with_llm(tool_results: dict, profile: dict, llm_call) -> list:
+def _condense_tool_results(tool_results: dict, profile: dict) -> str:
+    """
+    Extract only the key findings from each tool — compress ~10k tokens of raw JSON
+    into ~300-500 tokens of signal. Makes LLM synthesis fast and reliable on any model.
+    """
+    lines = []
 
-    prompt = f"""You are a spending intelligence agent. Analyze these results and generate 3-5 insights.
+    # profile summary
+    avg = profile.get("monthly_average", 0)
+    trend = profile.get("spending_trend", "")
+    months = profile.get("months_count", 0)
+    income = profile.get("monthly_income", 0)
+    if avg:
+        lines.append(f"Monthly average: ${avg:.0f}/mo over {months} months. Trend: {trend or 'stable'}.")
+    if income:
+        lines.append(f"Income: ${income:.0f}/mo. Net: ${income - avg:.0f}/mo.")
+
+    # spending impact — top 3 drivers
+    impact = tool_results.get("spending_impact", {})
+    if impact.get("model_valid") and impact.get("impacts"):
+        top3 = impact["impacts"][:3]
+        cats = ", ".join(f"{c['category']} ${c['monthly_avg']:.0f}/mo ({c['impact_pct']:.0f}% of variation)" for c in top3)
+        lines.append(f"Top spending drivers: {cats}.")
+
+    # temporal patterns
+    temporal = tool_results.get("temporal_patterns", {})
+    payday = temporal.get("payday", {})
+    weekly = temporal.get("weekly", {})
+    if payday.get("payday_detected"):
+        lines.append(f"Payday detected: {payday['spending_in_first_7_days_pct']:.0f}% spent in first 7 days.")
+    if weekly.get("weekend_spending_multiple", 1) > 1.1:
+        lines.append(f"Weekend spending: {weekly['weekend_spending_multiple']:.1f}x weekday average. "
+                      f"Highest day: {weekly.get('highest_spending_day', '?')}, lowest: {weekly.get('lowest_spending_day', '?')}.")
+
+    # subscriptions
+    subs = tool_results.get("subscription_hunter", {})
+    recurring = subs.get("recurring", [])
+    if recurring:
+        total_annual = sum(s.get("annual_cost", 0) for s in recurring)
+        lines.append(f"Subscriptions: {len(recurring)} found, ${total_annual:.0f}/year total.")
+    overlaps = subs.get("overlaps", [])
+    if overlaps:
+        overlap_cost = sum(o.get("combined_annual", 0) for o in overlaps)
+        lines.append(f"Subscription overlaps: {len(overlaps)} groups, ${overlap_cost:.0f}/year combined.")
+    creeping = [pc for pc in subs.get("price_creep", []) if pc.get("price_creep_detected")]
+    if creeping:
+        creep_total = sum(pc.get("annual_cost_increase", 0) for pc in creeping)
+        lines.append(f"Price creep: {len(creeping)} subscriptions increasing, ${creep_total:.0f}/year in increases.")
+
+    # anomalies
+    anomalies = tool_results.get("anomaly_detection", {})
+    spikes = anomalies.get("spending_spikes", [])
+    if spikes:
+        spike_strs = ", ".join(f"{s['category']} +{s['spike_pct']:.0f}%" for s in spikes[:3])
+        lines.append(f"Recent spending spikes: {spike_strs}.")
+    outliers = anomalies.get("outliers", [])
+    if outliers:
+        lines.append(f"Unusual transactions: {len(outliers)} flagged (largest: ${outliers[0].get('amount', 0):.0f} at {outliers[0].get('merchant', '?')}).")
+
+    # correlations
+    correlations = tool_results.get("correlation_engine", [])
+    if correlations:
+        corr_strs = ", ".join(
+            f"{c['category_a']}↔{c['category_b']} ({'move together' if c['correlation'] > 0 else 'opposite'})"
+            for c in correlations[:3]
+        )
+        lines.append(f"Spending connections: {corr_strs}.")
+
+    # financial resilience
+    resilience = tool_results.get("financial_resilience", {})
+    runway = resilience.get("runway", {})
+    if runway.get("months_of_runway"):
+        mo = runway["months_of_runway"]
+        if mo != float('inf') and mo < 200:
+            lines.append(f"Savings runway: {mo:.0f} months at current pace.")
+        else:
+            lines.append("Savings runway: surplus (earning more than spending).")
+
+    return "\n".join(lines)
+
+
+def _synthesize_with_llm(tool_results: dict, profile: dict, llm_call, avoid_topics: set = None) -> list:
+
+    summary = _condense_tool_results(tool_results, profile)
+
+    avoid_line = ""
+    if avoid_topics:
+        avoid_line = f"\n- AVOID these topics (already covered): {', '.join(avoid_topics)}. Find DIFFERENT angles."
+
+    prompt = f"""You are a spending intelligence agent. Generate 3-5 insights from this spending analysis.
 
 RULES:
-- Each insight must have: title, description, dollar_impact (annual), confidence (HIGH/MEDIUM/LOW), action_option
-- Use neutral framing. Never say "should", "bad", "problem", "waste", "too much"
+- Each insight: title, description, dollar_impact (annual, from the data), confidence (HIGH/MEDIUM/LOW), action_option
+- Neutral framing. Never say "should", "bad", "problem", "waste", "too much"
 - Frame actions as options: "One option would be..." not "You should..."
-- Dollar impact must be calculated from the data, not estimated
-- If no dollar impact, set to 0 and confidence to "informational"
-- NEVER generate insights that simply restate a category's total spending (e.g. "High Shopping Spend", "High Dining Spend"). The spending bars already show totals — every insight MUST connect 2+ data points or reveal something the charts don't show.
-- Each insight must be distinct — no two insights about the same pattern or category
-- NEVER suggest reducing essentials: groceries, rent, mortgage, healthcare, medical, insurance, utilities, childcare, education. The AI sees numbers, not whether someone is food-insecure or depends on a service for their wellbeing. Only flag discretionary spending.
+- Every insight MUST connect 2+ data points or reveal something non-obvious
+- Each insight must be distinct — no two about the same category
+- NEVER suggest reducing essentials (groceries, rent, healthcare, utilities, insurance)
+- Plain language only — no statistical jargon{avoid_line}
 
-RESULTS:
-{json.dumps(tool_results, indent=2, default=str)}
+ANALYSIS SUMMARY:
+{summary}
 
-DATA PROFILE:
-{json.dumps(profile, indent=2, default=str)}
-
-Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact": 0, "confidence": "HIGH", "action_option": "...", "tool_source": "..."}}]"""
+Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact": 0, "confidence": "HIGH", "action_option": "...", "tool_source": "llm"}}]"""
 
     try:
-        raw      = llm_call(prompt, temperature=0.0, max_tokens=1500)
-        insights = json.loads(extract_json(raw))
+        raw = llm_call(prompt, temperature=0.0, max_tokens=800)
+        if not raw:
+            return []
 
-        # validate framing
-        insights = [i for i in insights if validate_insight_framing(i)]
+        parsed = json.loads(extract_json(raw))
+        if isinstance(parsed, dict):
+            parsed = parsed.get("insights", [])
+
+        insights = [i for i in parsed if validate_insight_framing(i)]
+
+        for i in insights:
+            print(f"  LLM insight: {i.get('title', '')} — {i.get('description', '')[:80]}")
 
         return insights
 
     except Exception as e:
-        print(f"LLM synthesis failed ({e}) — returning empty insights")
+        print(f"LLM synthesis failed ({e})")
         return []
 
 
@@ -124,11 +218,11 @@ def _cross_reference(tool_results: dict) -> list:
         payday_pct  = payday["spending_in_first_7_days_pct"]
 
         cross_refs.append({
-            "title":         f"Post-payday {top_driver['category']} is your biggest swing factor",
+            "title":         f"Most of your {top_driver['category']} spending happens right after payday",
             "description":   (
-                f"{payday_pct}% of spending happens within 7 days of payday, "
-                f"and {top_driver['category']} drives {top_driver['impact_pct']}% of your month-to-month variance. "
-                f"Post-payday {top_driver['category']} likely accounts for a large share of your spending swings."
+                f"{payday_pct}% of your spending happens in the first week after payday, "
+                f"and {top_driver['category']} is the category that changes the most month to month. "
+                f"That first week after payday is likely when most of your {top_driver['category']} money goes."
             ),
             "dollar_impact": 0,
             "confidence":    "HIGH",
@@ -148,11 +242,11 @@ def _cross_reference(tool_results: dict) -> list:
         weekend_cats = ["dining", "entertainment", "transport", "shopping"]
         if top_driver["category"].lower() in weekend_cats:
             cross_refs.append({
-                "title":         f"Weekend {top_driver['category']} amplifies your spending variance",
+                "title":         f"Weekends are when your {top_driver['category']} spending jumps",
                 "description":   (
-                    f"Weekends run {mult}x weekday spending, and {top_driver['category']} "
-                    f"is your most variable category ({top_driver['impact_pct']}% of variance). "
-                    f"Weekend {top_driver['category']} is likely a compound driver."
+                    f"You spend about {mult}x more on weekends than weekdays, "
+                    f"and {top_driver['category']} is the category that changes the most from month to month. "
+                    f"Weekend {top_driver['category']} is likely a big part of why your total spending shifts."
                 ),
                 "dollar_impact": 0,
                 "confidence":    "MEDIUM",
@@ -178,11 +272,11 @@ def _cross_reference(tool_results: dict) -> list:
 
                 if related_cat and corr["correlation"] > 0:
                     cross_refs.append({
-                        "title":         f"{spike_cat} spike may be linked to {related_cat}",
+                        "title":         f"Your {spike_cat} and {related_cat} spending tend to rise together",
                         "description":   (
-                            f"{spike_cat} spiked {spike['spike_pct']:.0f}% last month. "
-                            f"{spike_cat} and {related_cat} are positively correlated (r={corr['correlation']}), "
-                            f"so {related_cat} spending may have risen too."
+                            f"{spike_cat} jumped {spike['spike_pct']:.0f}% last month. "
+                            f"When {spike_cat} goes up, {related_cat} usually does too — "
+                            f"so both categories may be climbing right now."
                         ),
                         "dollar_impact": 0,
                         "confidence":    "MEDIUM",
@@ -225,14 +319,15 @@ def _cross_reference(tool_results: dict) -> list:
         months     = runway["months_of_runway"]
 
         cross_refs.append({
-            "title":         f"{months:.0f}-month financial runway",
+            "title":         f"Your savings could cover about {months:.0f} months of expenses",
             "description":   (
-                f"At your current burn rate, savings would last ~{months:.0f} months without income. "
-                f"{top_driver['category']} is your most variable cost — reducing it would extend runway."
+                f"If your income stopped today, your current savings would last roughly {months:.0f} months "
+                f"at your current spending pace. {top_driver['category']} is the category that changes "
+                f"the most — spending less there would stretch your savings further."
             ),
             "dollar_impact": 0,
             "confidence":    "HIGH" if months < 6 else "MEDIUM",
-            "action_option": f"One option would be reducing {top_driver['category']} spending to extend your runway." if months < 12 else None,
+            "action_option": f"One option would be spending less on {top_driver['category']} to make your savings last longer." if months < 12 else None,
             "tool_source":   "cross_reference",
         })
 
@@ -308,15 +403,16 @@ def _deduplicate_insights(insights: list) -> list:
         desc  = insight.get("description", "").lower()
         text  = f"{title} {desc}"
 
-        # extract primary category/topic from the insight
-        key = _extract_insight_key(text)
+        # extract all matching topics — dedup if ANY key was already seen
+        keys = _extract_insight_keys(text)
 
-        if key and key in seen_categories:
-            print(f"Deduped insight (overlaps with '{key}'): {insight.get('title', '')[:60]}")
+        if keys and any(k in seen_categories for k in keys) and len(deduped) >= 3:
+            overlap = [k for k in keys if k in seen_categories][0]
+            print(f"Deduped insight (overlaps with '{overlap}'): {insight.get('title', '')[:60]}")
             continue
 
-        if key:
-            seen_categories.add(key)
+        for k in keys:
+            seen_categories.add(k)
         deduped.append(insight)
 
     removed = len(insights) - len(deduped)
@@ -326,21 +422,20 @@ def _deduplicate_insights(insights: list) -> list:
     return deduped
 
 
-def _extract_insight_key(text: str) -> str:
-    """Extract the primary topic from insight text for dedup comparison."""
+def _extract_insight_keys(text: str) -> list:
+    """Extract all matching topics from insight text for dedup comparison.
+    Returns a list of keys so an insight about 'payday + dining' is deduped
+    against both 'payday' and 'dining' insights independently.
+    """
 
-    # check for specific patterns that indicate the insight topic
     topic_keywords = [
         "subscription", "streaming", "payday", "weekend",
         "dining", "delivery", "shopping", "entertainment",
         "grocery", "transport", "correlation", "price creep",
+        "runway", "resilience",
     ]
 
-    for keyword in topic_keywords:
-        if keyword in text:
-            return keyword
-
-    return None
+    return [kw for kw in topic_keywords if kw in text]
 
 
 
@@ -389,8 +484,8 @@ def _extract_known_amounts(tool_results: dict) -> list:
 
     # subscription totals
     subs = tool_results.get("subscription_hunter", {})
-    if subs.get("subscriptions"):
-        for sub in subs["subscriptions"]:
+    if subs.get("recurring"):
+        for sub in subs["recurring"]:
             if sub.get("annual_cost"):
                 amounts.append(sub["annual_cost"])
     if subs.get("overlaps"):
@@ -420,11 +515,48 @@ def _extract_known_amounts(tool_results: dict) -> list:
 # SAVINGS PLAN
 ####################################
 
-def generate_savings_plan(df, results: dict) -> dict:
+def _savings_thresholds(profile: dict, monthly_spending: float) -> dict:
+    """
+    Anchored to the 50/30/20 rule: target saving 20% of income.
+    The further below 20% you are, the more aggressively we suggest cutting.
+    Clamped 10-20% so suggestions stay realistic.
+    """
+    income = profile.get("monthly_income", 0)
+    base   = income if income > 0 else monthly_spending
+
+    if base <= 0:
+        return {"min_monthly": 10, "cut_pct": 0.15, "min_annual": 20}
+
+    # min_monthly: skip categories below 2% of base (floor $10, cap $50)
+    min_monthly = min(50, max(10, round(base * 0.02)))
+
+    # cut_pct: based on gap to 20% savings rate
+    #   saving  5% -> cut 20%  (far from target, push harder)
+    #   saving 10% -> cut 20%  (still behind)
+    #   saving 15% -> cut 15%  (almost there, moderate)
+    #   saving 20% -> cut 10%  (at target, just optimize)
+    #   saving 30% -> cut 10%  (above target, light touch)
+    if income > 0:
+        savings_rate = max(0, (income - monthly_spending) / income)
+        cut_pct = min(0.20, max(0.10, 0.30 - savings_rate))
+    else:
+        cut_pct = 0.15  # no income data — middle ground
+
+    # min_annual: skip opportunities below 0.5% of yearly base (floor $20, cap $100)
+    min_annual = min(100, max(20, round(base * 12 * 0.005)))
+
+    return {"min_monthly": min_monthly, "cut_pct": cut_pct, "min_annual": min_annual}
+
+
+def generate_savings_plan(df, results: dict, profile: dict = None) -> dict:
     """
     Concrete savings opportunities from analysis + transaction data.
     No LLM call — pure computation.
+    Thresholds adapt to income when available.
     """
+    profile = profile or {}
+    monthly_spending = profile.get("monthly_spending", 0) or profile.get("monthly_average", 0)
+    thresh = _savings_thresholds(profile, monthly_spending)
 
     opportunities = []
 
@@ -456,19 +588,19 @@ def generate_savings_plan(df, results: dict) -> dict:
 
 
     # 3. top discretionary categories — with merchant breakdown
+    cut_pct = thresh["cut_pct"]
+    cut_label = f"{int(cut_pct * 100)}%"
+
     impact = results.get("spending_impact", {})
     if impact.get("model_valid") and impact.get("impacts"):
 
-        # whitelist — only discretionary categories, never essentials
-        discretionary_cats = {"dining", "delivery", "shopping", "entertainment", "personal care"}
-
         for imp in impact["impacts"]:
             cat = imp["category"]
-            if cat.lower() not in discretionary_cats:
+            if cat.lower() not in DISCRETIONARY_CATEGORIES:
                 continue
 
             avg = imp.get("monthly_avg", 0)
-            if avg < 30:
+            if avg < thresh["min_monthly"]:
                 continue
 
             # top merchants in this category
@@ -481,18 +613,67 @@ def generate_savings_plan(df, results: dict) -> dict:
                 .index.tolist()
             )
 
-            annual = round(avg * 0.20 * 12, 2)
-            if annual < 50:
+            annual = round(avg * cut_pct * 12, 2)
+            if annual < thresh["min_annual"]:
                 continue
 
             opportunities.append({
-                "title":           f"Reduce {cat} by 20%",
+                "title":           f"Reduce {cat} by {cut_label}",
                 "annual_savings":  annual,
                 "detail":          f"Currently ${avg:.0f}/mo. Top: {', '.join(top_merchants)}",
                 "merchants":       top_merchants,
                 "current_monthly": round(avg, 2),
                 "type":            "discretionary",
             })
+
+
+    # 4. fallback — derive opportunities directly from transaction data
+    #    when spending_impact didn't run or produced nothing usable
+    if not opportunities and len(df) > 0:
+        cat_col = "category"
+        if cat_col in df.columns:
+            df_copy = df.copy()
+            df_copy["date"] = pd.to_datetime(df_copy["date"], errors="coerce")
+            df_copy = df_copy.dropna(subset=["date"])
+
+            if len(df_copy) > 0:
+                n_months = max(
+                    1,
+                    (df_copy["date"].max() - df_copy["date"].min()).days / 30.0,
+                )
+                cat_totals = (
+                    df_copy[df_copy[cat_col].fillna("").str.lower().isin(DISCRETIONARY_CATEGORIES)]
+                    .groupby(df_copy[cat_col].str.lower())["amount"]
+                    .sum()
+                    .sort_values(ascending=False)
+                )
+
+                for cat, total_spent in cat_totals.items():
+                    monthly_avg = total_spent / n_months
+                    if monthly_avg < thresh["min_monthly"]:
+                        continue
+
+                    cat_txns = df_copy[df_copy[cat_col].fillna("").str.lower() == cat]
+                    top_merchants = (
+                        cat_txns.groupby("merchant")["amount"]
+                        .sum()
+                        .sort_values(ascending=False)
+                        .head(3)
+                        .index.tolist()
+                    )
+
+                    annual = round(monthly_avg * cut_pct * 12, 2)
+                    if annual < thresh["min_annual"]:
+                        continue
+
+                    opportunities.append({
+                        "title":           f"Reduce {cat.title()} by {cut_label}",
+                        "annual_savings":  annual,
+                        "detail":          f"Currently ~${monthly_avg:.0f}/mo. Top: {', '.join(top_merchants)}",
+                        "merchants":       top_merchants,
+                        "current_monthly": round(monthly_avg, 2),
+                        "type":            "discretionary",
+                    })
 
 
     # rank by impact, keep top 5
@@ -502,7 +683,7 @@ def generate_savings_plan(df, results: dict) -> dict:
     total = sum(o["annual_savings"] for o in opportunities)
 
     if not opportunities:
-        return None
+        return {"total_annual_savings": 0, "opportunities": []}
 
     return {
         "total_annual_savings": round(total, 2),
