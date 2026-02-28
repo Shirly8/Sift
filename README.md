@@ -1,6 +1,6 @@
 # Sift
 
-Upload a bank CSV. In 15 seconds, get a ranked action plan with dollar amounts, merchant names, and specific next steps. Ask a follow-up and the agent routes to the right computation tool, runs it on your real transactions, and explains the result. The LLM never generates numbers.
+Upload a bank CSV. Get a ranked action plan with dollar amounts, merchant names, and specific next steps. Ask a follow-up and the agent routes to the right computation tool, runs it on your real transactions, and explains the result. The LLM never generates numbers.
 
 ## Architecture
 
@@ -15,7 +15,7 @@ flowchart TD
 
     subgraph CAT["Categorization"]
         direction LR
-        C1["Rule Engine<br/>400+ patterns"] -->|miss| C2["Merchant Cache"] -->|miss| C3["LLM Batch"]
+        C1["Rule Engine<br/>~390 patterns"] -->|miss| C2["Merchant Cache"] -->|miss| C3["LLM Batch"]
     end
 
     subgraph AGENT["Orchestrator"]
@@ -46,9 +46,9 @@ flowchart TD
     CONV -.->|explain results| LLM
 ```
 
-The LLM touches three places: categorizing merchants the rule engine misses, explaining cross-tool findings, and writing up computation results for follow-up questions. It never generates numbers.
+The LLM touches three places: categorizing merchants the rule engine misses, explaining cross-tool findings, and writing up computation results for follow-up questions.
 
-## Agent, Not a Fixed Pipeline
+## WHY IS IT AN AGENT? 
 
 The orchestrator profiles your data first: how many months, how many categories, whether income is present. Then it decides which tools can produce reliable output. Each tool has hard minimums the LLM cannot override:
 
@@ -65,7 +65,7 @@ If your data can't support a reliable result, the tool gets skipped and the agen
 
 ## Categorization Cascade
 
-"STARBUCKS" doesn't need an LLM. The rule engine handles it at 0.95 confidence with zero latency and zero cost. The harder problem is "SP * ETSY" or "AMZ*WHOLEFDS". Those go to the LLM, but LLM classifications sit at 0.75 confidence, below the 0.80 cache threshold. Intentional. LLM results are useful but not trustworthy enough to propagate without review.
+"STARBUCKS" doesn't need an LLM. The rule engine handles it at 0.95 confidence with zero latency and zero cost. The harder problem is "SP * ETSY" or "AMZ*WHOLEFDS". Those go to the LLM, but LLM classifications sit at 0.75 confidence, below the 0.80 cache threshold. This is intentional because LLM results are useful but not trustworthy enough to propagate without review.
 
 ```mermaid
 flowchart LR
@@ -81,7 +81,7 @@ flowchart LR
     USER["User Correction<br/>0.99, permanent"] --> DONE
 ```
 
-At scale: the rule engine costs nothing. LLM fallback costs ~$0.002 per merchant. Classify everything with LLM at 1M users and you're spending ~$1.4M/month. Rules handle 70% for free. LLM only touches the ambiguous 30%.
+At scale: the rule engine costs nothing. LLM fallback costs per merchant. The rule engine handles the majority of merchants for free. The LLM only touches what's ambiguous.
 
 User corrections lock at 0.99 and permanently override everything. That's the most reliable signal in the system.
 
@@ -90,7 +90,7 @@ User corrections lock at 0.99 and permanently override everything. That's the mo
 The synthesizer cross-references results to find compound patterns no single tool can see:
 
 - **Payday timing + spending driver** = "39% of your Shopping happens in the first week after payday." Neither the temporal tool nor the spending impact tool produces this alone.
-- **Subscription overlap + price creep** = subscription costs growing from two directions simultaneously. Compounding cost growth invisible when viewed separately.
+- **Subscription overlap + price creep** = subscription costs growing from two directions simultaneously. Compounding cost growth that's invisible when viewed separately.
 - **Spending spike + behavioral correlation** = "Your Dining and Delivery tend to rise together." A spike in one looks isolated. Pearson with Benjamini-Hochberg FDR correction reveals they're linked.
 - **Financial resilience + spending driver** = "Your savings would last 8 months. Dining is where the swing is." Monte Carlo gives the runway. Spending impact tells you which lever to pull.
 
@@ -103,6 +103,14 @@ When you ask "How long would my savings last?", the conversational agent routes 
 `_fact_check_dollar_impacts()` runs on every LLM-generated insight. If the LLM claims a dollar amount exceeding 2x the largest verified amount from the tools, it gets capped and confidence is downgraded from HIGH to MEDIUM.
 
 9 computation tools handle follow-up questions: cancellation simulation, category breakdown, period comparison, merchant patterns, what-if scenarios, multi-category analysis, Monte Carlo projection, stress testing, and payday analysis. The LLM picks the right tool. The tool does the math.
+
+## Guardrails
+
+**Neutral framing.** The synthesizer maintains a banned-words list and never moralizes about spending. It won't say "you spend too much on dining" or suggest cutting essentials like groceries or rent. Insights are framed as observations with dollar amounts, not judgments. The user decides what matters.
+
+**LLM cost caps.** Each session tracks cumulative LLM spend. At $0.50, the system logs a warning. At $1.00, it aborts further LLM calls for that session. This prevents a runaway conversation or analysis loop from silently burning through API credits.
+
+**Session isolation.** Sessions live in memory with TTL expiration and capacity-based eviction. No user transaction data touches disk. When a session expires, the data is gone. The only persistent store is the merchant cache, which maps merchant names to categories, not transactions.
 
 ## Assumptions I Questioned
 
@@ -132,7 +140,7 @@ Backend on `:5001`, frontend on `:3000`. Upload any Wealthsimple, RBC, TD, or BM
 ```
 backend/
   Agent/          orchestrator, synthesizer, conversational agent
-  Categorization/ rule engine (400+ patterns), LLM fallback, merchant cache
+  Categorization/ rule engine (~390 patterns), LLM fallback, merchant cache
   Tools/          anomaly, correlation, subscriptions, temporal, Monte Carlo
   LLM/            provider-agnostic client with cost tracking
   Ingestion/      format detection, normalization, deduplication
@@ -140,7 +148,7 @@ backend/
 frontend/         Next.js 15, React 19, hand-drawn SVG charts
 ```
 
-35 unit tests:
+40 unit tests:
 
 ```bash
 cd backend && python -m pytest tests/ -v
