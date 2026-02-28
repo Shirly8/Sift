@@ -419,10 +419,11 @@ def _enrich_subscriptions(results: dict) -> None:
         if pc.get("price_creep_detected")
     }
 
-    overlap_map = {
-        o["category"]: o
-        for o in subs.get("overlaps", [])
-    }
+    # build merchant -> overlap mapping from overlap results
+    merchant_overlap_map = {}
+    for o in subs.get("overlaps", []):
+        for s in o.get("subscriptions", []):
+            merchant_overlap_map[s["merchant"]] = o
 
     for r in subs.get("recurring", []):
         creep = price_creep_map.get(r["merchant"])
@@ -432,8 +433,8 @@ def _enrich_subscriptions(results: dict) -> None:
         r["creep_to"]    = creep.get("current_price")         if creep else None
         r["history"]     = [p["amount"] for p in creep["price_history"]] if creep and creep.get("price_history") else [r["amount"]]
 
-        overlap = overlap_map.get(r["category"])
-        r["overlap"]       = r["category"] if overlap else None
+        overlap = merchant_overlap_map.get(r["merchant"])
+        r["overlap"]       = overlap["category"] if overlap else None
         r["overlap_count"] = overlap["count"] if overlap else 0
 
 

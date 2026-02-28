@@ -97,7 +97,7 @@ def detect_spending_spikes(df: pd.DataFrame) -> list:
     if "category" not in df.columns:
         return results
 
-    dates = df["date"]
+    dates = pd.to_datetime(df["date"])
 
     # need at least 2 months
     span_days = (dates.max() - dates.min()).days
@@ -159,7 +159,7 @@ def detect_new_merchants(df: pd.DataFrame, lookback_days: int = 30) -> list:
     """
 
     results = []
-    dates   = df["date"]
+    dates   = pd.to_datetime(df["date"])
     cutoff  = dates.max() - pd.Timedelta(days=lookback_days)
 
     # overall median for "high-value" threshold

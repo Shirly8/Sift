@@ -9,6 +9,7 @@ Routes:
 
 import io
 import os
+import re
 import sys
 import time
 import uuid
@@ -530,9 +531,12 @@ def correct_category():
     if not merchant or not category:
         return jsonify({"error": "merchant and category required"}), 400
 
-    # input validation: length limits and allowed categories
+    # input validation: length, character safety, and allowed categories
     if len(merchant) > 100:
         return jsonify({"error": "Merchant name too long (max 100 characters)"}), 400
+
+    if re.search(r'[^\x20-\x7E]', merchant):
+        return jsonify({"error": "Merchant name contains invalid characters"}), 400
 
     if category not in CATEGORIES:
         return jsonify({"error": f"Invalid category. Must be one of: {', '.join(CATEGORIES)}"}), 400

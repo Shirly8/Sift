@@ -21,7 +21,8 @@ import json
 import pandas as pd
 
 from LLM.client       import call_llm, extract_json
-from Tools.simulator  import run_projection, stress_test
+from Tools.simulator          import run_projection, stress_test
+from Tools.temporal_patterns  import detect_payday_pattern, detect_weekly_pattern
 from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
 
 
@@ -57,6 +58,9 @@ TOOLS:
 8. stress_test — Financial resilience scenarios. For questions about job loss, emergency fund, runway, "what if I lose my job?", "how long can I survive?"
    params: {"scenario": "job_loss"}  (job_loss/subscription_purge)
    For "what if rent/expenses go up?" questions, use simulate_future with expense_increase scenario instead.
+
+9. payday_analysis — Analyze spending relative to payday. For questions like "do I spend more after payday?", "when do I spend the most?", "payday spending", "first week spending", timing patterns.
+   params: {}
 
 Return JSON only: {"tool": "tool_name", "params": {...}}
 If the question is broad or general, use multi_analyze."""
@@ -402,7 +406,8 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
     # use total data span (not just active months) so the monthly average
     # reflects reality — a category with $300 across 3 months out of 12
     # is $25/mo annualized, not $100/mo
-    months_in_data = max(1, round((df["date"].max() - df["date"].min()).days / 30.44))
+    dates = pd.to_datetime(df["date"])
+    months_in_data = max(1, round((dates.max() - dates.min()).days / 30.44))
 
     current_monthly = current_total / months_in_data
     reduced_monthly = current_monthly * (1 - cut_pct / 100)
@@ -423,6 +428,24 @@ def _spending_what_if(df: pd.DataFrame, category: str, cut_pct: float) -> dict:
         "annual_savings":   round(annual_savings, 2),
         "category_pct":     round(category_pct, 1),
     }
+
+
+
+def _payday_analysis(df: pd.DataFrame, analysis_results: dict = None) -> dict:
+    """Analyze spending relative to payday using temporal pattern tools."""
+
+    # try pre-computed results first
+    if analysis_results and "temporal_patterns" in analysis_results:
+        tp = analysis_results["temporal_patterns"]
+        return {
+            "payday":  tp.get("payday", {}),
+            "weekly":  tp.get("weekly", {}),
+        }
+
+    # fallback: compute fresh
+    payday = detect_payday_pattern(df)
+    weekly = detect_weekly_pattern(df)
+    return {"payday": payday, "weekly": weekly}
 
 
 
@@ -497,6 +520,9 @@ def _execute_tool(tool_name: str, df: pd.DataFrame, params: dict, analysis_resul
 
     elif tool_name == "stress_test":
         return stress_test(df, params.get("scenario", "job_loss"))
+
+    elif tool_name == "payday_analysis":
+        return _payday_analysis(df, analysis_results)
 
     else:
         return _general_summary(df, analysis_results)

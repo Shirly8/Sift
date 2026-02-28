@@ -72,6 +72,10 @@ def detect_recurring_charges(df: pd.DataFrame) -> list:
         cat_lower  = cat.lower() if cat else ""
         amount_cv  = (amount_std / mean_amount) if mean_amount > 0 else 0
 
+        # skip income and transfers — these are not subscriptions
+        if cat_lower in {"income", "transfer", "transfers"}:
+            continue
+
         if cat_lower in HABIT_CATEGORIES and amount_cv > 0.10:
             # habit purchase: regular timing but inconsistent amounts
             # (e.g. Starbucks $4.50, $5.25, $6.10 — not a subscription)
@@ -176,31 +180,82 @@ def detect_price_creep(df: pd.DataFrame, merchant: str) -> dict:
 # STEP 3: DETECT SUBSCRIPTION OVERLAP
 ####################################
 
+
+# merchant name -> service type for overlap detection
+# only services where having 2+ is genuinely redundant
+SERVICE_TYPE_MAP = {
+    # video streaming
+    "NETFLIX":       "Video Streaming",
+    "DISNEY+":       "Video Streaming",
+    "DISNEYPLUS":    "Video Streaming",
+    "CRAVE":         "Video Streaming",
+    "PRIME VIDEO":   "Video Streaming",
+    "HULU":          "Video Streaming",
+    "HBO MAX":       "Video Streaming",
+    "PARAMOUNT+":    "Video Streaming",
+    "PEACOCK":       "Video Streaming",
+    "CRUNCHYROLL":   "Video Streaming",
+    "CINEPLEX":      "Video Streaming",
+    # music streaming
+    "SPOTIFY":       "Music Streaming",
+    "APPLE MUSIC":   "Music Streaming",
+    "YOUTUBE MUSIC": "Music Streaming",
+    "TIDAL":         "Music Streaming",
+    "DEEZER":        "Music Streaming",
+    # cloud storage
+    "ICLOUD":        "Cloud Storage",
+    "GOOGLE ONE":    "Cloud Storage",
+    "DROPBOX":       "Cloud Storage",
+    "ONEDRIVE":      "Cloud Storage",
+    # AI tools
+    "CLAUDE.AI":     "AI Tools",
+    "OPENAI":        "AI Tools",
+    "CHATGPT":       "AI Tools",
+    # productivity
+    "MICROSOFT 365": "Productivity Suite",
+    "OFFICE 365":    "Productivity Suite",
+    "GOOGLE WORKSPACE": "Productivity Suite",
+    # wellness
+    "HEADSPACE":     "Wellness",
+    "CALM":          "Wellness",
+}
+
+
+def _classify_service_type(merchant: str) -> str | None:
+    """Match a merchant name to a service type, or None if no match."""
+    name = merchant.upper()
+    for pattern, stype in SERVICE_TYPE_MAP.items():
+        if pattern in name:
+            return stype
+    return None
+
+
 def detect_subscription_overlap(recurring: list) -> list:
     """
-    Multiple subscriptions in the same category = potential overlap
+    Multiple subscriptions serving the same function = potential overlap
 
-    Group recurring charges by category, flag categories with 2+
-    Skip essential categories where multiple subs are normal (utilities, insurance, etc.)
+    Group recurring charges by service type (video streaming, music, etc.)
+    rather than by broad category. Only flag when 2+ services genuinely overlap.
     """
 
-    # categories where having 2+ subscriptions is normal, not overlap
     ESSENTIAL_CATEGORIES = {"Bills & Utilities", "Insurance", "Health", "Transport", "Rent & Housing", "Education"}
 
-    # group by category
-    by_category = {}
+    by_service = {}
     for sub in recurring:
-        cat = sub.get("category", "Unknown")
-        if cat in ESSENTIAL_CATEGORIES:
+        if sub.get("category", "Unknown") in ESSENTIAL_CATEGORIES:
             continue
-        if cat not in by_category:
-            by_category[cat] = []
-        by_category[cat].append(sub)
 
+        service_type = _classify_service_type(sub.get("merchant", ""))
+        if not service_type:
+            continue
+
+        if service_type not in by_service:
+            by_service[service_type] = []
+        by_service[service_type].append(sub)
 
     overlaps = []
 
-    for category, subs in by_category.items():
+    for service_type, subs in by_service.items():
         if len(subs) < 2:
             continue
 
@@ -211,7 +266,7 @@ def detect_subscription_overlap(recurring: list) -> list:
         potential_savings = round(combined_annual - cheapest, 2)
 
         overlaps.append({
-            "category":          category,
+            "category":          service_type,
             "subscriptions":     [{"merchant": s["merchant"], "annual": s["annual_cost"]} for s in subs],
             "count":             len(subs),
             "combined_annual":   round(combined_annual, 2),

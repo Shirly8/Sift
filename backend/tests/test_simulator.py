@@ -57,52 +57,51 @@ def short_df():
 # ─── PROJECTION TESTS ──────────────────────────────────────
 
 def test_projection_shape(sample_df):
-    """Projection returns 5 percentile bands with correct month count."""
-    result = run_projection(sample_df, months=6, n_sims=500)
+    """Projection returns monthly list with correct month count."""
+    result = run_projection(sample_df, months=6)
 
     assert "error" not in result
-    assert set(result["monthly_net"].keys()) == {10, 25, 50, 75, 90}
-    assert set(result["cumulative_net"].keys()) == {10, 25, 50, 75, 90}
+    assert len(result["monthly"]) == 6
 
-    for pct in [10, 25, 50, 75, 90]:
-        assert len(result["monthly_net"][pct]) == 6
-        assert len(result["cumulative_net"][pct]) == 6
+    for entry in result["monthly"]:
+        assert "spend_p10" in entry
+        assert "spend_p50" in entry
+        assert "spend_p90" in entry
+        assert "net_p50" in entry
 
 
 def test_percentile_ordering(sample_df):
-    """10th percentile <= 50th <= 90th at every month."""
-    result = run_projection(sample_df, months=6, n_sims=1000)
+    """p10 <= p50 <= p90 at every month."""
+    result = run_projection(sample_df, months=6)
 
-    for i in range(6):
-        assert result["monthly_net"][10][i] <= result["monthly_net"][50][i]
-        assert result["monthly_net"][50][i] <= result["monthly_net"][90][i]
+    for entry in result["monthly"]:
+        assert entry["spend_p10"] <= entry["spend_p50"]
+        assert entry["spend_p50"] <= entry["spend_p90"]
 
 
 def test_baseline_values(sample_df):
-    """Baseline includes income, spending, fixed, and variable breakdowns."""
-    result = run_projection(sample_df, months=6, n_sims=500)
+    """Baseline includes income, spending, and fixed cost breakdowns."""
+    result = run_projection(sample_df, months=6)
 
     baseline = result["baseline"]
     assert baseline["monthly_income"] > 0
     assert baseline["monthly_spending"] > 0
     assert baseline["fixed_costs"] >= 0
-    assert baseline["variable_spending"] > 0
 
 
 def test_job_loss_reduces_net(sample_df):
     """Job loss scenario should produce lower net than baseline."""
-    baseline = run_projection(sample_df, months=6, n_sims=500)
-    job_loss = run_projection(sample_df, months=6, n_sims=500, scenario={"type": "job_loss"})
+    baseline = run_projection(sample_df, months=6)
+    job_loss = run_projection(sample_df, months=6, scenario={"type": "job_loss"})
 
-    # median cumulative at month 6 should be worse under job loss
-    assert job_loss["cumulative_net"][50][-1] < baseline["cumulative_net"][50][-1]
+    # median net at final month should be worse under job loss
+    assert job_loss["monthly"][-1]["net_p50"] < baseline["monthly"][-1]["net_p50"]
 
 
 def test_short_data_projection(short_df):
     """Short dataset should still produce a projection (not crash)."""
-    result = run_projection(short_df, months=3, n_sims=100)
-    # either returns valid projection or an error dict — both are acceptable
-    assert "monthly_net" in result or "error" in result
+    result = run_projection(short_df, months=3)
+    assert "monthly" in result or "error" in result
 
 
 # ─── STRESS TEST TESTS ─────────────────────────────────────
@@ -130,36 +129,36 @@ def test_stress_categories_exclude_essentials(sample_df):
 
 
 def test_stress_subscription_purge(sample_df):
-    """Subscription purge returns savings and compounded amounts."""
+    """Subscription purge returns savings and compounded amount."""
     result = stress_test(sample_df, "subscription_purge")
 
     assert result["scenario"] == "subscription_purge"
     assert "monthly_savings" in result
     assert "annual_savings" in result
-    assert "compounded_savings" in result
-    assert "1yr" in result["compounded_savings"]
+    assert "compounded_5yr" in result
+    assert result["compounded_5yr"] > result["annual_savings"]
 
 
 def test_stress_invalid_scenario(sample_df):
-    """Invalid scenario name raises ValueError."""
-    with pytest.raises(ValueError):
-        stress_test(sample_df, "alien_invasion")
+    """Invalid scenario name returns error dict."""
+    result = stress_test(sample_df, "alien_invasion")
+    assert "error" in result
 
 
 # ─── RUNWAY TESTS ──────────────────────────────────────────
 
 def test_runway_with_income(sample_df):
-    """With income > spending, runway should be infinite."""
+    """With income > spending, runway should be positive."""
     result = calculate_runway(sample_df)
 
-    # income ($3500/mo) far exceeds spending — runway should be infinite or very large
     assert result["monthly_income"] > 0
-    assert "months_of_runway" in result
+    assert result["months_of_runway"] is not None
+    assert result["months_of_runway"] > 0
 
 
 def test_runway_no_income(no_income_df):
-    """No income → runway should be 0."""
+    """No income → runway should be None (cannot estimate without income)."""
     result = calculate_runway(no_income_df)
 
-    assert result["months_of_runway"] == 0
-    assert result["monthly_income"] == 0
+    assert result["months_of_runway"] is None
+    assert result.get("reason") is not None

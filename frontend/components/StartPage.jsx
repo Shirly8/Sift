@@ -22,10 +22,10 @@ const TRANSACTIONS = [
 const PIPELINE = [
     { num: '01', name: 'Ingest', desc: 'Auto-detects bank format. Cleans merchants, dedupes, scores quality.', tags: [{ label: 'Deterministic', type: 'rules' }] },
     { num: '02', name: 'Categorize', desc: 'Rules handle 70% at zero cost. LLM only for the ambiguous rest.', tags: [{ label: 'Rules', type: 'rules' }, { label: 'LLM', type: 'llm' }] },
-    { num: '03', name: 'Plan', desc: 'Agent profiles your data. Decides which tools to run and which to skip.', tags: [{ label: 'Agent', type: 'agent' }] },
-    { num: '04', name: 'Analyze', desc: "Five statistical tools with data minimums. Skips what it can't trust.", tags: [{ label: 'Statistical', type: 'stats' }] },
-    { num: '05', name: 'Synthesize', desc: 'Cross-references all results. Ranks insights by annual dollar impact.', tags: [{ label: 'LLM', type: 'llm' }] },
-    { num: '06', name: 'Ask', desc: 'Follow-ups route to real computation. LLM explains — never invents.', tags: [{ label: 'Agent', type: 'agent' }, { label: 'LLM', type: 'llm' }] },
+    { num: '03', name: 'Plan', desc: "Not a fixed pipeline. Profiles your data — months, categories, income — and skips tools it can't trust.", tags: [{ label: 'Agent', type: 'agent' }] },
+    { num: '04', name: 'Analyze', desc: 'IQR outlier scoring, subscription vs. habit detection, payday cycles, FDR-corrected correlation, Monte Carlo stress testing. Every number computed on your data.', tags: [{ label: 'Statistical', type: 'stats' }] },
+    { num: '05', name: 'Synthesize', desc: 'Cross-references results across tools. Ranks insights by dollar impact. The LLM never invents a dollar amount.', tags: [{ label: 'LLM', type: 'llm' }] },
+    { num: '06', name: 'Ask', desc: '"What if I cancel Netflix?" routes to a cancellation simulator. "How long would savings last?" runs Monte Carlo. Tools compute, LLM explains.', tags: [{ label: 'Agent', type: 'agent' }, { label: 'LLM', type: 'llm' }] },
 ];
 
 // spending bars for dashboard preview
@@ -534,11 +534,11 @@ export default function StartPage({ onUpload }) {
                         <div className="log-entry reveal">scanning <span className="val">847</span> transactions</div>
                         <div className="log-entry reveal"><span className="val">11</span> months of data · <span className="val">14</span> categories · income <span className="on">detected</span></div>
                         <div className="log-entry reveal"><span className="dim">───────────────────────────────</span></div>
-                        <div className="log-entry reveal"><span className="on">✓</span> temporal_patterns <span className="dim">— 11 mo ≥ 3 mo minimum</span></div>
-                        <div className="log-entry reveal"><span className="on">✓</span> anomaly_detection <span className="dim">— always enabled</span></div>
-                        <div className="log-entry reveal"><span className="on">✓</span> subscription_hunter <span className="dim">— recurring charges detected</span></div>
-                        <div className="log-entry reveal"><span className="on">✓</span> correlation_engine <span className="dim">— 14 categories, 11 months</span></div>
-                        <div className="log-entry reveal"><span className="on">✓</span> impact_attribution <span className="dim">— 11 mo ≥ 6 mo minimum</span></div>
+                        <div className="log-entry reveal"><span className="on">✓</span> anomaly_detection <span className="dim">— IQR outlier scoring, always enabled</span></div>
+                        <div className="log-entry reveal"><span className="on">✓</span> subscription_hunter <span className="dim">— recurring vs. habit filtering</span></div>
+                        <div className="log-entry reveal"><span className="on">✓</span> temporal_patterns <span className="dim">— payday cycles, 11 mo ≥ 3 mo min</span></div>
+                        <div className="log-entry reveal"><span className="on">✓</span> correlation_engine <span className="dim">— FDR-corrected, 14 cats, 11 mo</span></div>
+                        <div className="log-entry reveal"><span className="on">✓</span> spending_impact <span className="dim">— variance drivers, 11 mo ≥ 6 mo min</span></div>
                         <div className="log-entry reveal"><span className="dim">───────────────────────────────</span></div>
                         <div className="log-entry reveal">full suite enabled · executing <span className="val">5</span> tools</div>
                         <div className="log-entry reveal">done in <span className="val">2.3s</span></div>
@@ -546,14 +546,16 @@ export default function StartPage({ onUpload }) {
 
                     {/* aside explanation */}
                     <div className="agent-log__aside reveal">
-                        <div className="agent-log__aside-title">More data, deeper analysis. Less data, honest limits.</div>
-                        Give it 6 weeks of transactions and it runs only anomaly detection and subscription
-                        hunting. It tells you exactly which tools were skipped and why — &quot;correlation
-                        analysis requires 3+ months of data.&quot;
+                        <div className="agent-log__aside-title">Not a fixed pipeline. Tools qualify or get skipped.</div>
+                        Each tool has hard data minimums. Correlation needs 3+ months and 3+ categories.
+                        Spending impact needs 6+. If your data can&apos;t support a reliable result, the tool
+                        is skipped — and you&apos;re told why.
                         <br /><br />
-                        Two weeks? You still get a focused report on what the data can support. Twelve months?
-                        Full suite — all five tools, cross-referenced. The agent scales its analysis to match
-                        your data. Nothing more, nothing less.
+                        Tools that qualify run in parallel: IQR-based anomaly detection, subscription hunting
+                        that distinguishes recurring charges from habits, payday cycle detection,
+                        cross-category correlation with false-discovery-rate correction, and Monte Carlo stress
+                        testing across 1,000 simulations. Every number is computed on your data. The LLM never
+                        invents a dollar amount.
                     </div>
                 </div>
             </section>
