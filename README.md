@@ -2,8 +2,8 @@
 
 Upload a bank CSV. Get a ranked action plan with dollar amounts, merchant names, and specific next steps. Ask a follow-up and the agent routes to the right computation tool, runs it on your real transactions, and explains the result. The LLM never generates numbers.
 
-- **[Live Demo](https://sift.shirleyproject.com)**
-- **[Demo Video](https://youtu.be/qdhzzxOljrk)**
+- **[Live Application](https://sift.shirleyproject.com)**
+- **[Video](https://youtu.be/qdhzzxOljrk)**
 
 ## Architecture
 
