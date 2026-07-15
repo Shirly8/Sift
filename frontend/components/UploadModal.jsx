@@ -57,10 +57,19 @@ export default function UploadModal({ open, onClose, onComplete }) {
       const formData = new FormData();
       formData.append('file', file);
 
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/upload`, {
-        method: 'POST',
-        body: formData,
-      });
+      let response;
+      for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+          response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/upload`, {
+            method: 'POST',
+            body: formData,
+          });
+          break;
+        } catch {
+          if (attempt === 2) throw new Error('Failed to fetch');
+          await new Promise(r => setTimeout(r, 2000));
+        }
+      }
 
       if (response.status === 429) {
         const data = await response.json();
