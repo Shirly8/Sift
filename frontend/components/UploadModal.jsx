@@ -11,6 +11,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
   const [sessionId, setSessionId] = useState(null);
   const [blockedMessage, setBlockedMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
+  const [wakingUp, setWakingUp] = useState(false);
   const fileInputRef = useRef(null);
 
 
@@ -22,6 +23,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
     setSessionId(null);
     setBlockedMessage('');
     setErrorMessage('');
+    setWakingUp(false);
 
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/status`)
       .then(r => r.json())
@@ -58,7 +60,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
       formData.append('file', file);
 
       let response;
-      for (let attempt = 0; attempt < 3; attempt++) {
+      for (let attempt = 0; attempt < 5; attempt++) {
         try {
           response = await fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/upload`, {
             method: 'POST',
@@ -66,10 +68,12 @@ export default function UploadModal({ open, onClose, onComplete }) {
           });
           break;
         } catch {
-          if (attempt === 2) throw new Error('Failed to fetch');
-          await new Promise(r => setTimeout(r, 2000));
+          if (attempt === 4) throw new Error('Failed to fetch');
+          if (attempt === 0) setWakingUp(true);
+          await new Promise(r => setTimeout(r, 8000));
         }
       }
+      setWakingUp(false);
 
       if (response.status === 429) {
         const data = await response.json();
@@ -191,8 +195,12 @@ export default function UploadModal({ open, onClose, onComplete }) {
         {state === 'processing' && (
           <div className="upload-processing">
             <div className="spinner spinner--lg" />
-            <h2 className="heading-section upload-heading">Reading your transactions...</h2>
-            <p className="upload-desc">This should only take a moment</p>
+            <h2 className="heading-section upload-heading">
+              {wakingUp ? 'Waking up the server...' : 'Reading your transactions...'}
+            </h2>
+            <p className="upload-desc">
+              {wakingUp ? 'The server was idle — this takes about 30 seconds on first load.' : 'This should only take a moment'}
+            </p>
           </div>
         )}
 
