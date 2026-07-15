@@ -5,20 +5,31 @@ import { useState, useRef, useEffect } from 'react';
 
 export default function UploadModal({ open, onClose, onComplete }) {
 
-  const [state, setState] = useState('drop');    // drop | processing | ready
+  const [state, setState] = useState('drop');    // drop | processing | ready | blocked
   const [dragover, setDragover] = useState(false);
   const [uploadSummary, setUploadSummary] = useState(null);
   const [sessionId, setSessionId] = useState(null);
+  const [blockedMessage, setBlockedMessage] = useState('');
   const fileInputRef = useRef(null);
 
 
-  // reset when opened
+  // reset and check service status when opened
   useEffect(() => {
-    if (open) {
-      setState('drop');
-      setUploadSummary(null);
-      setSessionId(null);
-    }
+    if (!open) return;
+    setState('drop');
+    setUploadSummary(null);
+    setSessionId(null);
+    setBlockedMessage('');
+
+    fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/status`)
+      .then(r => r.json())
+      .then(data => {
+        if (!data.accepting) {
+          setBlockedMessage(data.message || 'Uploads are temporarily paused.');
+          setState('blocked');
+        }
+      })
+      .catch(() => {});
   }, [open]);
 
 
@@ -47,6 +58,20 @@ export default function UploadModal({ open, onClose, onComplete }) {
         method: 'POST',
         body: formData,
       });
+
+      if (response.status === 429) {
+        const data = await response.json();
+        setBlockedMessage(data.message || "You've used up your demo for today. Come back tomorrow for another try.");
+        setState('blocked');
+        return;
+      }
+
+      if (response.status === 503) {
+        const data = await response.json();
+        setBlockedMessage(data.message || 'The demo is temporarily unavailable. Check back soon.');
+        setState('blocked');
+        return;
+      }
 
       if (!response.ok) {
         const error = await response.json();
@@ -113,6 +138,20 @@ export default function UploadModal({ open, onClose, onComplete }) {
               style={{ display: 'none' }}
               onChange={(e) => handleUpload(e.target.files?.[0])}
             />
+          </div>
+        )}
+
+
+        {/* STATE: blocked — rate limited or service disabled */}
+        {state === 'blocked' && (
+          <div className="upload-processing">
+            <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="var(--terra)" strokeWidth="1.5" strokeLinecap="round">
+              <circle cx="12" cy="12" r="10" />
+              <line x1="12" y1="8" x2="12" y2="12" />
+              <line x1="12" y1="16" x2="12.01" y2="16" />
+            </svg>
+            <h2 className="heading-section upload-heading">You've reached the demo limit</h2>
+            <p className="upload-desc">{blockedMessage}</p>
           </div>
         )}
 

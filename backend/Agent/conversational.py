@@ -20,7 +20,7 @@ to run on their actual data, executes them, then explains the results.
 import json
 import pandas as pd
 
-from LLM.client       import call_llm, extract_json
+from LLM.client       import call_llm, extract_json, SONNET_MODEL
 from Tools.simulator          import run_projection, stress_test
 from Tools.temporal_patterns  import detect_payday_pattern, detect_weekly_pattern
 from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
@@ -608,7 +608,7 @@ COMPUTATION RESULTS:
 
 Respond in plain text (not JSON). Be conversational but data-driven."""
 
-    response = call_llm(prompt, temperature=0.0, max_tokens=400)
+    response = call_llm(prompt, temperature=0.0, max_tokens=400, model=SONNET_MODEL)
 
     if not response:
         # fallback: return raw computation as a simple summary
@@ -642,7 +642,7 @@ MULTI-TOOL COMPUTATION RESULTS:
 
 Respond in plain text. Be direct, specific, and actionable."""
 
-    response = call_llm(prompt, temperature=0.0, max_tokens=600)
+    response = call_llm(prompt, temperature=0.0, max_tokens=600, model=SONNET_MODEL)
 
     if not response:
         return f"Here's what I found: {json.dumps(computation, indent=2, default=str)}"

@@ -52,11 +52,19 @@ limiter = Limiter(
     get_remote_address,
     app=app,
     default_limits=[],          # no global limit — set per route
-    storage_uri="memory://",
+    storage_uri=os.getenv("REDIS_URL", "memory://"),
 )
 
 # trust proxy headers (Railway, Heroku, etc.) so rate limiting works behind a reverse proxy
 app.config["RATELIMIT_HEADERS_ENABLED"] = True
+
+
+@app.errorhandler(429)
+def rate_limit_exceeded(e):
+    return jsonify({
+        "error": "rate_limited",
+        "message": "You've used up your demo for today. Come back tomorrow for another try.",
+    }), 429
 
 _rules          = build_rule_engine()
 _merchant_db    = load_merchant_db()       # loaded once at startup, kept in memory
@@ -263,8 +271,17 @@ def health_check():
     return jsonify({"status": "ok"})
 
 
+@app.route("/api/status", methods=["GET"])
+def service_status():
+    disabled = os.getenv("DISABLE_UPLOADS", "").lower() in ("1", "true", "yes")
+    return jsonify({
+        "accepting": not disabled,
+        "message": "The demo is temporarily unavailable. Check back soon." if disabled else None,
+    })
+
+
 @app.route("/api/upload", methods=["POST"])
-@limiter.limit("30 per day")
+@limiter.limit("3 per day")
 def upload():
     """
     Accepts a CSV file, runs ingestion + rule categorization.
@@ -273,6 +290,12 @@ def upload():
       POST (multipart file)
       -> {"session_id": "...", "summary": {...}}
     """
+
+    if os.getenv("DISABLE_UPLOADS", "").lower() in ("1", "true", "yes"):
+        return jsonify({
+            "error": "service_disabled",
+            "message": "The demo is temporarily unavailable. Check back soon.",
+        }), 503
 
     if "file" not in request.files:
         return jsonify({"error": "No file provided"}), 400
@@ -314,7 +337,7 @@ def upload():
 
 
 @app.route("/api/analyze", methods=["POST"])
-@limiter.limit("20 per day")
+@limiter.limit("3 per day")
 def analyze():
     """
     Runs the full agent analysis pipeline.
@@ -384,7 +407,7 @@ def analyze():
 
 
 @app.route("/api/analyze-stream", methods=["GET"])
-@limiter.limit("20 per day")
+@limiter.limit("3 per day")
 def analyze_stream():
     """
     SSE endpoint — streams real-time progress as each analysis tool runs.
@@ -397,8 +420,15 @@ def analyze_stream():
     if not session_id:
         return jsonify({"error": "session_id required"}), 400
 
+    with _analyzing_lock:
+        if session_id in _analyzing:
+            return jsonify({"error": "Analysis already in progress for this session"}), 409
+        _analyzing.add(session_id)
+
     session = _get_session(session_id)
     if not session:
+        with _analyzing_lock:
+            _analyzing.discard(session_id)
         return jsonify({"error": "Session expired — please re-upload your file", "session_expired": True}), 400
 
     df = session["df"].copy()
@@ -437,6 +467,8 @@ def analyze_stream():
             except Exception as e:
                 error_holder[0] = e
             finally:
+                with _analyzing_lock:
+                    _analyzing.discard(session_id)
                 q.put(None)  # sentinel
 
         thread = threading.Thread(target=run_analysis)
@@ -466,7 +498,7 @@ def analyze_stream():
 
 
 @app.route("/api/ask", methods=["POST"])
-@limiter.limit("50 per day")
+@limiter.limit("10 per day")
 def ask_question():
     """
     Conversational follow-up — agent picks tools, runs computations, explains results.
@@ -514,7 +546,7 @@ def ask_question():
 
 
 @app.route("/api/correct-category", methods=["POST"])
-@limiter.limit("30 per day")
+@limiter.limit("5 per day")
 def correct_category():
     """
     Learn from user category corrections.

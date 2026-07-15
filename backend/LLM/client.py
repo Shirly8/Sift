@@ -15,7 +15,11 @@ Usage:
 import os
 import re
 import time
+import requests
 
+
+SONNET_MODEL = "claude-sonnet-4-6"
+HAIKU_MODEL  = "claude-haiku-4-5-20251001"
 
 PRICING = {
     "claude-haiku-4-5-20251001": {"input": 0.80,  "output": 4.00},
@@ -189,6 +193,17 @@ def _track_usage(input_tokens: int, output_tokens: int, model: str):
 ####################################
 # STEP 4: UNIFIED CALL (with retry)
 ####################################
+
+def get_ip_address() -> str:
+
+    try:
+        ip_address = requests.get("https://api.ipify.org?format=json", timeout=5)
+        ip_address.raise_for_status()
+        return ip_address.json().get("ip", "Unknown")
+    except requests.RequestException as e:
+        print(f"Error retrieving IP address: {e}")
+        return "Unknown"
+
 
 def call_llm(prompt: str, temperature: float = 0.0, max_tokens: int = 500, model: str = None) -> str:
 

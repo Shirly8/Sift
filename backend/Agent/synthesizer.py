@@ -14,7 +14,7 @@ E.g. payday spike + dining is top variance driver = post-payday dining is the sw
 import json
 import pandas as pd
 
-from LLM.client import call_llm, extract_json
+from LLM.client import call_llm, extract_json, SONNET_MODEL
 from Categorization.constants import ESSENTIAL_CATEGORIES, DISCRETIONARY_CATEGORIES
 
 
@@ -167,7 +167,7 @@ ANALYSIS SUMMARY:
 Return JSON array only: [{{"title": "...", "description": "...", "dollar_impact": 0, "confidence": "HIGH", "action_option": "...", "tool_source": "llm"}}]"""
 
     try:
-        raw = llm_call(prompt, temperature=0.0, max_tokens=800)
+        raw = llm_call(prompt, temperature=0.0, max_tokens=800, model=SONNET_MODEL)
         if not raw:
             return []
 
