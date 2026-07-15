@@ -3,8 +3,10 @@ services:
     name: sift-backend
     runtime: python
     rootDir: backend
-    buildCommand: pip install -r requirements.txt
+    buildCommand: pip install --upgrade pip && pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: PYTHON_VERSION
         value: "3.13.0"
+      - key: POETRY_DISABLED
+        value: "1"
