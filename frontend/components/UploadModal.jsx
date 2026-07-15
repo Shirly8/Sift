@@ -142,7 +142,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
             <p style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: 'var(--ink-muted)' }}>
               Don&rsquo;t have a CSV?{' '}
               <a
-                href="https://raw.githubusercontent.com/Shirly8/Sift/main/sample_transactions.csv"
+                href="/sample_transactions.csv"
                 download="sample_transactions.csv"
                 style={{ color: 'var(--terra)', textDecoration: 'underline', cursor: 'pointer' }}
               >
