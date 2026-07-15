@@ -266,6 +266,7 @@ def _ingest_csv(content: str, rules: dict, merchant_db: dict) -> tuple:
 # ROUTES
 ####################################
 
+@app.route("/", methods=["GET"])
 @app.route("/api/health-check", methods=["GET"])
 def health_check():
     return jsonify({"status": "ok"})
