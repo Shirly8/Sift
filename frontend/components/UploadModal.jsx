@@ -10,6 +10,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
   const [uploadSummary, setUploadSummary] = useState(null);
   const [sessionId, setSessionId] = useState(null);
   const [blockedMessage, setBlockedMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
   const fileInputRef = useRef(null);
 
 
@@ -20,6 +21,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
     setUploadSummary(null);
     setSessionId(null);
     setBlockedMessage('');
+    setErrorMessage('');
 
     fetch(`${process.env.NEXT_PUBLIC_API_URL}/api/status`)
       .then(r => r.json())
@@ -44,10 +46,11 @@ export default function UploadModal({ open, onClose, onComplete }) {
   // upload to backend /api/upload
   async function handleUpload(file) {
     if (!file || !file.name.endsWith('.csv')) {
-      alert('Please provide a CSV file');
+      setErrorMessage('Please provide a CSV file.');
       return;
     }
 
+    setErrorMessage('');
     setState('processing');
 
     try {
@@ -86,7 +89,9 @@ export default function UploadModal({ open, onClose, onComplete }) {
 
     } catch (err) {
       console.error('Upload error:', err);
-      alert(`Upload failed: ${err.message}`);
+      setErrorMessage(err.message === 'Failed to fetch'
+        ? 'Could not reach the server. Please try again.'
+        : `Something went wrong: ${err.message}`);
       setState('drop');
     }
   }
@@ -139,7 +144,13 @@ export default function UploadModal({ open, onClose, onComplete }) {
               onChange={(e) => handleUpload(e.target.files?.[0])}
             />
 
-            <p style={{ marginTop: 20, textAlign: 'center', fontSize: 13, color: 'var(--ink-muted)' }}>
+            {errorMessage && (
+              <p style={{ marginTop: 16, textAlign: 'center', fontSize: 13, color: 'var(--terra)' }}>
+                {errorMessage}
+              </p>
+            )}
+
+            <p style={{ marginTop: 12, textAlign: 'center', fontSize: 13, color: 'var(--ink-muted)' }}>
               Don&rsquo;t have a CSV?{' '}
               <a
                 href="/sample_transactions.csv"
