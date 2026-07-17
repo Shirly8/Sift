@@ -285,7 +285,7 @@ def service_status():
 
 
 @app.route("/api/upload", methods=["POST"])
-@limiter.limit("3 per day")
+@limiter.limit("10 per day")
 def upload():
     """
     Accepts a CSV file, runs ingestion + rule categorization.
