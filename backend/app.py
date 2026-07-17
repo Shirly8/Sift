@@ -336,7 +336,12 @@ def upload():
     except ValueError as e:
         return jsonify({"error": str(e)}), 422
     except Exception as e:
-        return jsonify({"error": f"Processing failed: {str(e)}"}), 500
+        import traceback
+        print(f"Upload 500 error: {e}\n{traceback.format_exc()}")
+        resp = jsonify({"error": f"Processing failed: {str(e)}"})
+        resp.status_code = 500
+        resp.headers["Access-Control-Allow-Origin"] = os.getenv("ALLOWED_ORIGIN", "*")
+        return resp
 
 
 
