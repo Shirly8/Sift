@@ -18,8 +18,8 @@ from filelock import FileLock
 from Categorization.constants import USER_VERIFIED_CONFIDENCE, CACHE_THRESHOLD
 
 
-DB_PATH = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
-_LOCK  = FileLock(DB_PATH + ".lock", timeout=5)
+DB_PATH  = os.path.join(os.path.dirname(__file__), "../Data/merchant_cache.json")
+LOCK_PATH = DB_PATH + ".lock"
 
 
 
@@ -32,7 +32,7 @@ def load_merchant_db(file_path: str = DB_PATH) -> dict:
     if not os.path.exists(file_path):
         return {}
 
-    with _LOCK:
+    with FileLock(file_path + ".lock", timeout=5):
         with open(file_path, "r") as f:
             return json.load(f)
 
@@ -84,6 +84,6 @@ def update_from_user_correction(merchant: str, correct_category: str, db_path: s
 
 def _save_db(db: dict, db_path: str):
     os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    with _LOCK:
+    with FileLock(db_path + ".lock", timeout=5):
         with open(db_path, "w") as f:
             json.dump(db, f, indent=2)
