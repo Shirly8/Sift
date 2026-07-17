@@ -61,10 +61,13 @@ app.config["RATELIMIT_HEADERS_ENABLED"] = True
 
 @app.errorhandler(429)
 def rate_limit_exceeded(e):
-    return jsonify({
+    response = jsonify({
         "error": "rate_limited",
         "message": "You've used up your demo for today. Come back tomorrow for another try.",
-    }), 429
+    })
+    response.status_code = 429
+    response.headers["Access-Control-Allow-Origin"] = os.getenv("ALLOWED_ORIGIN", "*")
+    return response
 
 _rules          = build_rule_engine()
 _merchant_db    = load_merchant_db()       # loaded once at startup, kept in memory
