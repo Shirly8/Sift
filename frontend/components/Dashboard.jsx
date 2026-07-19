@@ -263,13 +263,13 @@ export default function Dashboard({ initialShowUpload = false, initialSessionId 
                   return (
                     <div key={i} className="flex items-center gap-3" style={{ opacity: 1, transition: 'opacity 0.3s ease' }}>
                       {isLast ? (
-                        <div className="spinner" style={{ width: 22, height: 22, borderWidth: '2px', flexShrink: 0 }} />
+                        <div className="spinner" style={{ width: 28, height: 28, borderWidth: '2.5px', flexShrink: 0 }} />
                       ) : (
-                        <div style={{ width: 22, height: 22, borderRadius: '50%', background: 'var(--sage-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="var(--sage-dark)" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>
+                        <div style={{ width: 28, height: 28, borderRadius: '50%', background: 'var(--sage-light)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0 }}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--sage-dark)" strokeWidth="3" strokeLinecap="round"><path d="M5 12l5 5L20 7" /></svg>
                         </div>
                       )}
-                      <span className={`text-sm ${isLast ? 'fw-600' : 'ink-mid'}`}>{step}</span>
+                      <span style={{ fontSize: 16, fontWeight: isLast ? 600 : 400, color: isLast ? 'var(--ink)' : 'var(--ink-mid)' }}>{step}</span>
                     </div>
                   );
                 })}

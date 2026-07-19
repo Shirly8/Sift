@@ -53,6 +53,7 @@ limiter = Limiter(
     app=app,
     default_limits=[],          # no global limit — set per route
     storage_uri=os.getenv("REDIS_URL", "memory://"),
+    enabled=os.getenv("RATELIMIT_ENABLED", "true").lower() != "false",
 )
 
 # trust proxy headers (Railway, Heroku, etc.) so rate limiting works behind a reverse proxy
@@ -484,7 +485,10 @@ def analyze_stream():
         thread.start()
 
         while True:
-            event = q.get()
+            try:
+                event = q.get(timeout=120)
+            except queue.Empty:
+                break
             if event is None:
                 break
             yield f"data: {json.dumps(serialize_for_json(event))}\n\n"
