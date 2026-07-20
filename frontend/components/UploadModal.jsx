@@ -199,7 +199,7 @@ export default function UploadModal({ open, onClose, onComplete }) {
               {wakingUp ? 'Waking up the server...' : 'Reading your transactions...'}
             </h2>
             <p className="upload-desc">
-              {wakingUp ? 'The server was idle — this takes about 10–15 seconds on first load.' : 'This should only take a moment'}
+              {wakingUp ? 'The server was idle — this takes about 10–15 seconds on first load.' : 'Categorizing merchants — this takes about 30 seconds'}
             </p>
           </div>
         )}

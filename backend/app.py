@@ -320,6 +320,9 @@ def upload():
     try:
         df, format_type, summary = _ingest_csv(content, _rules, _merchant_db)
 
+        # run LLM categorization here so analyze-stream is fast (~2s instead of ~30s)
+        _auto_categorize_with_llm(df)
+
         session_id = str(uuid.uuid4())
         _store_session(session_id, {
             "df":               df,
