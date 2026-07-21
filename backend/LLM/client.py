@@ -14,6 +14,7 @@ Usage:
 
 import os
 import re
+import json
 import time
 import requests
 
@@ -240,30 +241,32 @@ def call_llm(prompt: str, temperature: float = 0.0, max_tokens: int = 500, model
 
 def extract_json(raw: str) -> str:
     """
-    LLMs often wrap JSON in ```json ... ``` — strip it before parsing.
+    LLMs often wrap JSON in ```json ... ``` or add trailing text after the JSON.
+    Uses raw_decode to find the first valid JSON value and stop there.
 
-      extract_json('```json\\n{"a": 1}\\n```')  ->  '{"a": 1}'
-      extract_json('{"a": 1}')                  ->  '{"a": 1}'
-      extract_json(None)                         ->  '{}'
+      extract_json('```json\\n{"a": 1}\\n```')        ->  '{"a": 1}'
+      extract_json('[{...}]\\n\\nSome explanation.')   ->  '[{...}]'
+      extract_json('{"a": 1}')                         ->  '{"a": 1}'
+      extract_json(None)                               ->  '{}'
     """
 
     if not raw:
         return "{}"
 
-    # fenced code block
+    # fenced code block — strip fence then fall through to raw_decode
     match = re.search(r"```(?:json)?\s*([\s\S]*?)```", raw)
     if match:
-        return match.group(1).strip()
+        raw = match.group(1).strip()
 
-    # bare JSON array in surrounding text
-    match = re.search(r"(\[[\s\S]*\])", raw)
-    if match:
-        return match.group(1).strip()
-
-    # bare JSON object in surrounding text
-    match = re.search(r"(\{[\s\S]*\})", raw)
-    if match:
-        return match.group(1).strip()
+    # find the first valid JSON value (array or object), ignore trailing text
+    decoder = json.JSONDecoder()
+    for i, ch in enumerate(raw):
+        if ch in ('[', '{'):
+            try:
+                _, end = decoder.raw_decode(raw, i)
+                return raw[i:end].strip()
+            except json.JSONDecodeError:
+                continue
 
     return raw.strip()
 
